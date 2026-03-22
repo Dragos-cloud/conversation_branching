@@ -1,0 +1,2525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!-- SECTION:META
+  App: ORAND Conversation Brancher
+  Version: 1.3
+  Description: Non-linear LLM conversation tool with branching, fork management, soft-delete audit trail, MD export, and full-text search
+  Last-modified: 2026-03-22
+  Sections: META, CONFIG, STYLE, STATE, UI, LOGIC:db, LOGIC:actionlog, LOGIC:lmstudio, LOGIC:tree, LOGIC:branch, LOGIC:search, LOGIC:export, EVENTS, INIT, USERGUIDE
+-->
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="X-Content-Type-Options" content="nosniff">
+<title>ORAND Conversation Brancher</title>
+
+<!-- SECTION:STYLE -->
+<style>
+  /* === DESIGN TOKENS === */
+  :root {
+    --blue: #0097d7;
+    --blue-dark: #007fb5;
+    --blue-light: #e6f6fc;
+    --orange: #f68710;
+    --orange-light: #fff4e6;
+    --trunk-color: #0097d7;
+    --branch-colors: #e74c3c, #27ae60, #8e44ad, #e67e22;
+    --b0: #e74c3c;
+    --b1: #27ae60;
+    --b2: #8e44ad;
+    --b3: #e67e22;
+    --bg: #f4f6f9;
+    --surface: #ffffff;
+    --border: #dde3ea;
+    --text: #1a2332;
+    --text-muted: #6b7a8d;
+    --radius: 8px;
+    --shadow: 0 2px 8px rgba(0,0,0,0.08);
+    --shadow-lg: 0 4px 20px rgba(0,0,0,0.12);
+    --sidebar-width: 350px;
+    --header-height: 56px;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
+    color: var(--text);
+    background: var(--bg);
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* === LAYOUT === */
+  #appShell { display: flex; flex-direction: column; height: 100vh; }
+
+  #topBar {
+    height: var(--header-height);
+    background: var(--surface);
+    border-bottom: 2px solid var(--blue);
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    gap: 12px;
+    flex-shrink: 0;
+    z-index: 100;
+    box-shadow: var(--shadow);
+  }
+
+  #topBar .logo { color: var(--blue); font-weight: 700; font-size: 17px; letter-spacing: -0.3px; }
+  #topBar .logo span { color: var(--orange); }
+  #topBar .subtitle { color: var(--text-muted); font-size: 12px; border-left: 1px solid var(--border); padding-left: 12px; }
+
+  .top-tabs { display: flex; gap: 4px; margin-left: auto; }
+  .top-tab {
+    padding: 6px 16px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    transition: all 0.15s;
+  }
+  .top-tab.active { background: var(--blue); color: #fff; border-color: var(--blue); }
+  .top-tab:hover:not(.active) { background: var(--blue-light); color: var(--blue); }
+
+  #mainArea { display: flex; flex: 1; overflow: hidden; }
+
+  /* === SIDEBAR === */
+  #sidebar {
+    width: var(--sidebar-width);
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    overflow: hidden;
+  }
+
+  #sidebarHeader {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--bg);
+    min-height: 63px;
+  }
+  #sidebarHeader h3 { font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+
+  #treeContainer { flex: 1; overflow-y: auto; padding: 8px 0; }
+
+  /* Tree nodes */
+  .tree-node {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 7px 14px;
+    cursor: pointer;
+    font-size: 13px;
+    border-left: 3px solid transparent;
+    transition: all 0.12s;
+    position: relative;
+    min-height: fit-content;
+  }
+  .tree-node:hover { background: var(--bg); }
+  .tree-node.active { background: var(--blue-light); border-left-color: var(--blue); }
+  .tree-node.branch-node { padding-left: 28px; }
+  .tree-node.branch-node.active { background: #fff; }
+
+  .node-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    margin-top: 4px;
+  }
+  .node-label { 
+    flex: 1; 
+    word-break: break-word; 
+    line-height: 1.4; 
+    min-width: 0;
+    overflow-wrap: break-word;
+    white-space: normal;
+  }
+
+  .node-edit-btn {
+    display: none;
+    background: none; border: none;
+    color: var(--text-muted); font-size: 12px;
+    cursor: pointer; padding: 1px 4px; border-radius: 4px;
+    flex-shrink: 0; line-height: 1;
+    opacity: 0.6;
+    margin-top: 2px;
+  }
+  .tree-node:hover .node-edit-btn { display: inline-block; }
+  .node-edit-btn:hover { opacity: 1; color: var(--blue); background: var(--blue-light); }
+
+  .node-label-input {
+    flex: 1; border: 1px solid var(--blue);
+    border-radius: 4px; padding: 2px 6px;
+    font-size: 13px; font-family: inherit;
+    outline: none; background: var(--surface);
+    min-width: 0;
+  }
+  .node-badge {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 10px;
+    background: var(--orange-light);
+    color: var(--orange);
+    font-weight: 600;
+    flex-shrink: 0;
+    margin-top: 3px;
+  }
+  .node-badge.trunk { background: var(--blue-light); color: var(--blue); }
+
+  .fork-connector {
+    padding: 2px 14px 2px 28px;
+    font-size: 11px;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .fork-connector::before {
+    content: '';
+    display: inline-block;
+    width: 16px;
+    height: 1px;
+    background: var(--border);
+  }
+
+  #sidebarFooter {
+    padding: 10px 14px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  /* === SEARCH === */
+  #searchContainer {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
+  }
+  #searchInput {
+    width: 100%;
+    padding: 7px 10px 7px 32px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+    background: var(--surface) url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="%236b7a8d" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>') no-repeat 8px center;
+    transition: border-color 0.15s;
+  }
+  #searchInput:focus { border-color: var(--blue); }
+  #searchInput::placeholder { color: var(--text-muted); }
+  
+  #searchResults {
+    max-height: 300px;
+    overflow-y: auto;
+    margin-top: 8px;
+    display: none;
+  }
+  #searchResults.visible { display: block; }
+  
+  .search-result-item {
+    padding: 8px 10px;
+    margin-bottom: 4px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.12s;
+  }
+  .search-result-item:hover {
+    background: var(--blue-light);
+    border-color: var(--blue);
+  }
+  .search-result-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+  .search-result-snippet {
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.4;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+  .search-result-meta {
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-top: 4px;
+  }
+  .search-highlight {
+    background: #ffeb3b;
+    color: var(--text);
+    font-weight: 600;
+    padding: 0 2px;
+  }
+  #searchClear {
+    position: absolute;
+    right: 24px;
+    top: 17px;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 16px;
+    padding: 4px;
+    border-radius: 4px;
+    display: none;
+    line-height: 1;
+  }
+  #searchClear:hover { background: var(--bg); color: var(--text); }
+  #searchClear.visible { display: block; }
+  .search-empty {
+    padding: 20px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+
+  /* === CHAT PANEL === */
+  #chatPanel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--bg);
+  }
+
+  #chatHeader {
+    padding: 10px 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    flex-shrink: 0;
+    min-height: 52px;
+  }
+  #chatContextBadge {
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-weight: 600;
+  }
+  #chatNodeTitle { font-weight: 600; font-size: 14px; }
+  #chatNodeDesc { font-size: 12px; color: var(--text-muted); }
+  #branchActions { margin-left: auto; display: flex; gap: 6px; }
+
+  .branch-action-btn {
+    padding: 4px 10px;
+    font-size: 12px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    cursor: pointer;
+    font-weight: 500;
+    transition: all 0.12s;
+    display: none;
+  }
+  .branch-action-btn.visible { display: inline-flex; align-items: center; gap: 4px; }
+  .branch-action-btn:hover { transform: translateY(-1px); box-shadow: var(--shadow); }
+  .btn-discard { color: #e74c3c; border-color: #fadbd8; }
+  .btn-discard:hover { background: #fadbd8; }
+  .btn-commit { color: var(--blue); border-color: #aed6f1; }
+  .btn-commit:hover { background: var(--blue-light); }
+  .btn-promote { color: #27ae60; border-color: #a9dfbf; }
+  .btn-promote:hover { background: #eafaf1; }
+  .btn-split { color: var(--orange); border-color: #fde8c8; }
+  .btn-split:hover { background: var(--orange-light); }
+
+  #messagesArea {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  /* Messages */
+  .message-wrap { display: flex; flex-direction: column; max-width: 80%; gap: 4px; }
+  .message-wrap.user { align-self: flex-end; align-items: flex-end; }
+  .message-wrap.assistant { align-self: flex-start; align-items: flex-start; }
+
+  .message-bubble {
+    padding: 10px 14px;
+    border-radius: 12px;
+    font-size: 14px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .message-wrap.user .message-bubble {
+    background: var(--blue);
+    color: #fff;
+    border-bottom-right-radius: 4px;
+  }
+  .message-wrap.assistant .message-bubble {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-bottom-left-radius: 4px;
+    box-shadow: var(--shadow);
+  }
+  .message-meta { font-size: 11px; color: var(--text-muted); padding: 0 4px; }
+
+  /* Fork button on messages */
+  .msg-fork-btn {
+    display: inline-block;
+    font-size: 10px;
+    padding: 2px 7px;
+    border-radius: 10px;
+    border: 1px dashed var(--orange);
+    color: var(--orange);
+    background: transparent;
+    cursor: pointer;
+    margin-top: 3px;
+    opacity: 0.55;
+    transition: all 0.12s;
+  }
+  .msg-fork-btn:hover { background: var(--orange); color: #fff; opacity: 1; }
+
+  /* Fork indicator in message stream */
+  .fork-marker {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 0;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  .fork-marker::before, .fork-marker::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+  .fork-marker-label {
+    padding: 2px 10px;
+    border-radius: 10px;
+    background: var(--orange-light);
+    color: var(--orange);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  /* Typing indicator */
+  .typing-indicator { display: flex; gap: 4px; align-items: center; padding: 12px 14px; }
+  .typing-indicator span {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--text-muted);
+    animation: bounce 1.2s infinite;
+  }
+  .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+  .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes bounce { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-6px)} }
+
+  /* Context note */
+  .context-note {
+    font-size: 12px;
+    color: var(--text-muted);
+    background: var(--blue-light);
+    border: 1px solid #b3e0f2;
+    border-radius: 6px;
+    padding: 8px 12px;
+    align-self: stretch;
+    text-align: center;
+  }
+
+  /* === INPUT AREA === */
+  #inputArea {
+    padding: 12px 16px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  #inputRow { display: flex; gap: 8px; align-items: flex-end; }
+
+  #userInput {
+    flex: 1;
+    resize: none;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 14px;
+    font-family: inherit;
+    line-height: 1.5;
+    min-height: 44px;
+    max-height: 140px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  #userInput:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(0,151,215,0.1); }
+
+  #sendBtn {
+    height: 44px;
+    padding: 0 18px;
+    background: var(--blue);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.15s;
+    flex-shrink: 0;
+  }
+  #sendBtn:hover { background: var(--blue-dark); }
+  #sendBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  #inputMeta { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-muted); }
+  #modelBadge {
+    padding: 2px 8px;
+    background: var(--blue-light);
+    color: var(--blue);
+    border-radius: 10px;
+    font-weight: 600;
+    font-size: 11px;
+  }
+  #addForkBtn {
+    margin-left: auto;
+    padding: 4px 12px;
+    border: 1px dashed var(--orange);
+    color: var(--orange);
+    background: var(--orange-light);
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.12s;
+  }
+  #addForkBtn:hover { background: var(--orange); color: #fff; }
+  #addForkBtn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* === FORK PANEL === */
+  #forkPanel {
+    display: none;
+    background: var(--surface);
+    border: 1px solid var(--orange);
+    border-radius: 10px;
+    margin: 0 16px 8px;
+    padding: 12px;
+    box-shadow: var(--shadow-lg);
+  }
+  #forkPanel.visible { display: block; }
+
+  #forkPanelHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  #forkPanelHeader h4 { font-size: 13px; color: var(--orange); font-weight: 700; }
+  #closeForkPanel { background: none; border: none; color: var(--text-muted); font-size: 18px; cursor: pointer; line-height: 1; }
+
+  #forkBranchList { display: flex; flex-direction: column; gap: 8px; }
+  .fork-branch-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .fork-branch-color {
+    width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0;
+  }
+  .fork-branch-input {
+    flex: 1;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 10px;
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+  }
+  .fork-branch-input:focus { border-color: var(--orange); }
+  .fork-branch-remove {
+    background: none; border: none; color: #e74c3c; font-size: 18px; cursor: pointer; flex-shrink: 0; line-height: 1;
+  }
+
+  #forkPanelFooter { display: flex; gap: 8px; margin-top: 10px; justify-content: flex-end; }
+
+  /* === BUTTONS === */
+  .btn {
+    padding: 7px 14px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    transition: all 0.12s;
+  }
+  .btn-primary { background: var(--blue); color: #fff; border-color: var(--blue); }
+  .btn-primary:hover { background: var(--blue-dark); }
+  .btn-orange { background: var(--orange); color: #fff; border-color: var(--orange); }
+  .btn-orange:hover { background: #d4730e; }
+  .btn-sm { padding: 4px 10px; font-size: 12px; }
+  .btn-ghost { background: transparent; border-color: var(--border); color: var(--text-muted); }
+  .btn-ghost:hover { background: var(--bg); color: var(--text); }
+
+  /* === CONFIG PANEL === */
+  #configPanel {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  #configPanel label { font-size: 12px; color: var(--text-muted); font-weight: 600; }
+  #configPanel input, #configPanel select {
+    padding: 5px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 12px;
+    font-family: inherit;
+    outline: none;
+    background: var(--surface);
+  }
+  #configPanel input:focus, #configPanel select:focus { border-color: var(--blue); }
+  #lmStatusDot {
+    width: 8px; height: 8px; border-radius: 50%; background: #ccc; flex-shrink: 0;
+  }
+  #lmStatusDot.connected { background: #27ae60; }
+  #lmStatusDot.error { background: #e74c3c; }
+  #lmStatusText { font-size: 11px; color: var(--text-muted); }
+
+  /* === MODAL === */
+  .modal-overlay {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.4);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+  }
+  .modal-overlay.visible { display: flex; }
+  .modal-box {
+    background: var(--surface);
+    border-radius: 12px;
+    box-shadow: var(--shadow-lg);
+    padding: 24px;
+    max-width: 480px;
+    width: 90%;
+  }
+  .modal-box h3 { margin-bottom: 10px; color: var(--text); }
+  .modal-box p { color: var(--text-muted); font-size: 14px; margin-bottom: 16px; }
+  .modal-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+
+  /* === NEW CONVO BUTTON === */
+  #newConvoBtn {
+    padding: 6px 12px;
+    font-size: 12px;
+    background: var(--blue);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  #newConvoBtn:hover { background: var(--blue-dark); }
+
+  /* === EMPTY STATE === */
+  #emptyState {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    gap: 12px;
+    padding: 32px;
+  }
+  #emptyState .empty-icon { font-size: 48px; opacity: 0.3; }
+  #emptyState p { font-size: 14px; text-align: center; max-width: 300px; }
+
+  /* === USER GUIDE TAB === */
+  #guideTab {
+    display: none;
+    flex: 1;
+    overflow-y: auto;
+    padding: 32px;
+    background: var(--bg);
+  }
+  #guideTab.active { display: block; }
+  #appTab { display: flex; flex: 1; overflow: hidden; }
+  #appTab.hidden { display: none; }
+
+  .guide-container { max-width: 800px; margin: 0 auto; }
+  .guide-section { background: var(--surface); border-radius: var(--radius); padding: 24px; margin-bottom: 20px; border: 1px solid var(--border); }
+  .guide-section h2 { color: var(--blue); margin-bottom: 16px; font-size: 18px; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
+  .guide-section h3 { color: var(--text); margin: 14px 0 8px; font-size: 15px; }
+  .guide-section p { color: var(--text-muted); margin-bottom: 10px; font-size: 14px; }
+  .guide-section ul { color: var(--text-muted); font-size: 14px; padding-left: 20px; }
+  .guide-section ul li { margin-bottom: 6px; }
+  .guide-section code { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px; font-size: 12px; font-family: 'Cascadia Code', 'Consolas', monospace; color: var(--blue-dark); }
+  .guide-section .step { display: flex; gap: 12px; margin-bottom: 12px; align-items: flex-start; }
+  .guide-section .step-num { width: 26px; height: 26px; border-radius: 50%; background: var(--blue); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
+
+  .lifecycle-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+  .lifecycle-card { border-radius: 8px; padding: 14px; border: 1px solid var(--border); }
+  .lifecycle-card h4 { font-size: 13px; margin-bottom: 6px; }
+  .lifecycle-card p { font-size: 12px; margin: 0; }
+  .lc-discard { border-color: #fadbd8; background: #fff8f8; }
+  .lc-discard h4 { color: #e74c3c; }
+  .lc-commit { border-color: #aed6f1; background: var(--blue-light); }
+  .lc-commit h4 { color: var(--blue); }
+  .lc-promote { border-color: #a9dfbf; background: #f0faf4; }
+  .lc-promote h4 { color: #27ae60; }
+  .lc-split { border-color: #fde8c8; background: var(--orange-light); }
+  .lc-split h4 { color: var(--orange); }
+
+  .warning-box { background: #fff8e6; border: 1px solid #fdd; border-radius: 6px; padding: 12px; font-size: 13px; color: #7a4f00; }
+  .info-box { background: var(--blue-light); border: 1px solid #b3e0f2; border-radius: 6px; padding: 12px; font-size: 13px; color: var(--blue-dark); }
+
+  /* scrollbar */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #b0b8c4; }
+</style>
+</head>
+<body>
+
+<!-- SECTION:UI -->
+<div id="appShell">
+
+  <!-- Top Bar -->
+  <div id="topBar">
+    <div class="logo">ORAND <span>Brancher</span></div>
+    <div class="subtitle">Non-linear AI conversations</div>
+    <div class="top-tabs">
+      <button class="top-tab active" data-tab="app">🌿 Conversations</button>
+      <button class="top-tab" data-tab="guide">📖 User Guide</button>
+    </div>
+  </div>
+
+  <!-- App Tab -->
+  <div id="appTab" style="display:flex;flex:1;overflow:hidden;">
+    <div id="mainArea" style="display:flex;flex:1;overflow:hidden;flex-direction:column;">
+
+      <!-- LM Studio Config Bar -->
+      <div id="configPanel">
+        <label>LM Studio:</label>
+        <input type="text" id="lmUrl" value="http://localhost:1234" style="width:180px;">
+        <select id="modelSelect" style="width:200px;"><option value="">— select model —</option></select>
+        <button class="btn btn-sm btn-ghost" id="refreshModelsBtn">↻ Refresh</button>
+        <button class="btn btn-sm btn-ghost" id="testLMBtn" title="Open LM Studio models endpoint in browser to verify connection" style="font-size:11px;">🔗 Test</button>
+        <div id="lmStatusDot"></div>
+        <span id="lmStatusText">Not connected</span>
+        <button class="btn btn-sm btn-ghost" id="newConvoBtn" style="margin-left:auto;">+ New Conversation</button>
+      </div>
+
+      <div style="display:flex;flex:1;overflow:hidden;">
+
+        <!-- Sidebar Tree -->
+        <div id="sidebar">
+          <div id="sidebarHeader">
+            <h3>Conversation Tree</h3>
+          </div>
+          <div id="searchContainer" style="position:relative;">
+            <input type="text" id="searchInput" placeholder="Search conversations..." />
+            <button id="searchClear" title="Clear search">×</button>
+            <div id="searchResults"></div>
+          </div>
+          <div id="treeContainer">
+            <div style="padding:20px;text-align:center;color:var(--text-muted);font-size:12px;">No conversations yet.<br>Start a new one above.</div>
+          </div>
+          <div id="sidebarFooter">
+            <button class="btn btn-sm btn-ghost" id="exportMdBtn" style="font-size:11px;color:var(--blue);border-color:#b3e0f2;">⬇ Export as Markdown</button>
+            <button class="btn btn-sm btn-ghost" id="clearAllBtn" style="font-size:11px;color:#e74c3c;border-color:#fadbd8;">🗑 Clear All Data</button>
+            <button class="btn btn-sm btn-ghost" id="resetDbBtn" style="font-size:10px;color:#999;margin-top:2px;" title="Use if app fails to load — resets browser storage">⚙ Reset DB</button>
+          </div>
+        </div>
+
+        <!-- Chat Panel -->
+        <div id="chatPanel">
+          <!-- Chat Header -->
+          <div id="chatHeader">
+            <div id="chatContextBadge" style="background:var(--blue-light);color:var(--blue);">TRUNK</div>
+            <div>
+              <div id="chatNodeTitle">No conversation selected</div>
+              <div id="chatNodeDesc">Select or create a conversation</div>
+            </div>
+            <div id="branchActions">
+              <button class="branch-action-btn btn-discard" id="btnDiscard">✕ Discard</button>
+              <button class="branch-action-btn btn-commit" id="btnCommit">↩ Commit to Main</button>
+              <button class="branch-action-btn btn-promote" id="btnPromote">⬆ Promote to Main</button>
+              <button class="branch-action-btn btn-split" id="btnSplit">⎇ Split to New Tree</button>
+            </div>
+          </div>
+
+          <!-- Messages -->
+          <div id="messagesArea">
+            <div id="emptyState">
+              <div class="empty-icon">🌿</div>
+              <p>Select a node from the tree or start a new conversation to begin.</p>
+            </div>
+          </div>
+
+          <!-- Fork Panel (inline, above input) -->
+          <div id="forkPanel">
+            <div id="forkPanelHeader">
+              <h4>⎇ Create Branch(es) at this fork point</h4>
+              <button id="closeForkPanel">×</button>
+            </div>
+            <div id="forkBranchList"></div>
+            <div id="forkPanelFooter">
+              <button class="btn btn-sm btn-ghost" id="addAnotherBranch">+ Add Branch</button>
+              <button class="btn btn-sm btn-orange" id="submitForkBtn">Launch Branches →</button>
+            </div>
+          </div>
+
+          <!-- Input Area -->
+          <div id="inputArea">
+            <div id="inputRow">
+              <textarea id="userInput" rows="1" placeholder="Type your message… (Ctrl+Enter to send)"></textarea>
+              <button id="sendBtn">Send →</button>
+            </div>
+            <div id="inputMeta">
+              <span id="modelBadge">No model</span>
+              <span style="color:var(--text-muted);">Ctrl+Enter to send</span>
+              <button id="addForkBtn">⎇ Fork from last reply</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- Guide Tab -->
+  <div id="guideTab">
+    <!-- SECTION:USERGUIDE -->
+    <div class="guide-container">
+
+      <div class="guide-section">
+        <h2>🌿 ORAND Conversation Brancher — Overview</h2>
+        <p>Most AI chat tools are linear — one message follows another in a single thread. The ORAND Conversation Brancher introduces a <strong>tree-based conversation model</strong>: you can fork any LLM response into multiple parallel branches, explore them independently, then decide what to do with each branch.</p>
+        <p>Everything runs locally in your browser with <strong>zero data leaving your machine</strong>. Conversations persist across sessions using IndexedDB.</p>
+      </div>
+
+      <div class="guide-section">
+        <h2>⚙️ LM Studio Setup (Required)</h2>
+        <p>This app connects to <strong>LM Studio</strong> running locally on your machine. Follow these steps before using the app:</p>
+
+        <div class="step"><div class="step-num">1</div><div><strong>Download LM Studio</strong> from <code>lmstudio.ai</code> and install it.</div></div>
+        <div class="step"><div class="step-num">2</div><div><strong>Download a model</strong> — recommended: any 7B–14B quantized model (Q4 or Q5). Good options: Llama 3, Mistral, Qwen2.5, Gemma 2.</div></div>
+        <div class="step"><div class="step-num">3</div><div><strong>Load the model</strong> — open LM Studio, go to the Chat tab, and load your chosen model.</div></div>
+        <div class="step"><div class="step-num">4</div><div><strong>Start the local server</strong> — go to the <em>Local Server</em> tab in LM Studio and click <em>Start Server</em>. Default port is <code>1234</code>.</div></div>
+        <div class="step"><div class="step-num">5</div><div><strong>Enable CORS</strong> — in LM Studio's server settings, ensure <em>"Allow requests from any origin"</em> (CORS) is enabled. Without this the browser cannot connect.</div></div>
+        <div class="step"><div class="step-num">6</div><div><strong>Verify</strong> — open <code>http://localhost:1234/v1/models</code> in your browser. You should see a JSON list of loaded models.</div></div>
+
+        <div class="warning-box" style="margin-top:14px;">⚠️ <strong>CORS is critical.</strong> If you see "Failed to fetch" errors in the app, CORS is not enabled in LM Studio. Check the server settings panel — it is usually a single checkbox labeled "Allow cross-origin requests".</div>
+
+        <h3>Connecting in the App</h3>
+        <ul>
+          <li>The Base URL defaults to <code>http://localhost:1234</code> — change it only if you use a different port.</li>
+          <li>Click <strong>↻ Refresh</strong> to load available models from LM Studio.</li>
+          <li>Select a model from the dropdown. The status dot turns green when connected.</li>
+        </ul>
+      </div>
+
+      <div class="guide-section">
+        <h2>🌲 Conversation Tree Concepts</h2>
+
+        <h3>Trunk</h3>
+        <p>The main conversation thread. Shown in blue in the sidebar. All conversations start here. The trunk can have multiple unresolved forks simultaneously.</p>
+
+        <h3>Fork Point</h3>
+        <p>A point in the trunk where you created branches. Marked visually in the message stream with a divider. A fork point stays open until all its branches are resolved.</p>
+
+        <h3>Branch</h3>
+        <p>A diverging conversation thread created at a fork point. Inherits a <strong>summarized snapshot</strong> of the trunk context up to the fork — keeping token count manageable for local models. Branches are color-coded (red, green, purple, orange).</p>
+
+        <div class="info-box" style="margin-top:10px;">📌 Maximum <strong>4 branches per fork point</strong>. Multiple fork points can be open simultaneously on the trunk.</div>
+      </div>
+
+      <div class="guide-section">
+        <h2>⎇ How to Branch</h2>
+
+        <div class="step"><div class="step-num">1</div><div>Have an active conversation on the trunk with at least one LLM reply.</div></div>
+        <div class="step"><div class="step-num">2</div><div>Each assistant message on the trunk shows a persistent <strong>"⎇ Fork here"</strong> button below it.</div></div>
+        <div class="step"><div class="step-num">3</div><div>Click it, or click <strong>"⎇ Fork from last reply"</strong> in the input bar to fork from the latest message.</div></div>
+        <div class="step"><div class="step-num">4</div><div>The Fork Panel opens. Each row is one branch. Type the seed prompt for each direction you want to explore.</div></div>
+        <div class="step"><div class="step-num">5</div><div>Add up to 4 branches. Click <strong>"Launch Branches →"</strong> to send all prompts simultaneously.</div></div>
+        <div class="step"><div class="step-num">6</div><div>Branches appear in the sidebar tree under their fork point. Click any to switch focus.</div></div>
+      </div>
+
+      <div class="guide-section">
+        <h2>🔄 Branch Lifecycle — 4 Actions</h2>
+        <p>When viewing a branch, action buttons appear in the chat header. Each resolves the branch differently:</p>
+        <div class="lifecycle-grid">
+          <div class="lifecycle-card lc-discard">
+            <h4>✕ Discard</h4>
+            <p>Delete this branch permanently. The trunk and other branches are unaffected.</p>
+          </div>
+          <div class="lifecycle-card lc-commit">
+            <h4>↩ Commit to Main</h4>
+            <p>Add a summary of this branch as a context message in the trunk. Branch is then closed.</p>
+          </div>
+          <div class="lifecycle-card lc-promote">
+            <h4>⬆ Promote to Main</h4>
+            <p>This branch becomes the new trunk from the fork point. All other branches at this fork are discarded.</p>
+          </div>
+          <div class="lifecycle-card lc-split">
+            <h4>⎇ Split to New Tree</h4>
+            <p>Export this branch as a completely independent new conversation. It is removed from this tree.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="guide-section">
+        <h2>💾 Data &amp; Privacy</h2>
+        <ul>
+          <li>All conversations are stored in <strong>IndexedDB</strong> — your browser's built-in database.</li>
+          <li>Data persists across page refreshes and browser restarts.</li>
+          <li>Nothing is sent to any external server. LM Studio runs locally.</li>
+          <li>Use <strong>🗑 Clear All Data</strong> in the sidebar to wipe the IndexedDB completely.</li>
+        </ul>
+        <div class="info-box" style="margin-top:10px;">🔒 This app processes everything client-side. No telemetry, no analytics, no cloud.</div>
+      </div>
+
+      <div class="guide-section">
+        <h2>⬇ Exporting to Markdown</h2>
+        <p>Click <strong>⬇ Export as Markdown</strong> in the sidebar footer to save the active conversation as a structured <code>.md</code> file.</p>
+
+        <h3>What the Export Contains</h3>
+        <ul>
+          <li><strong>Header table</strong> — conversation title, export date, model, message count, branch count.</li>
+          <li><strong>Conversation Tree</strong> — ASCII diagram showing trunk, fork points, and all branches with their status.</li>
+          <li><strong>Action History</strong> — git-like table of every fork, discard, commit, promote, and split with timestamps.</li>
+          <li><strong>Trunk Conversation</strong> — full Q&amp;A with fork point markers inline.</li>
+          <li><strong>All Branches</strong> — every branch regardless of status (active, committed, discarded, promoted, split), each with its context snapshot, status metadata, and full Q&amp;A.</li>
+        </ul>
+
+        <h3>Discarded Branches</h3>
+        <p>Branches marked as Discarded are <strong>soft-deleted</strong> — hidden from the tree UI but fully preserved in IndexedDB. Their complete conversation appears in the export under <em>🗑 Discarded</em> status, enabling a full audit of every exploration path taken.</p>
+
+        <h3>File Naming</h3>
+        <p>Files are named automatically: <code>conversation_title_YYYY-MM-DD.md</code>. If your browser supports the File System Access API (Chrome/Edge), a save dialog appears. Other browsers download directly.</p>
+
+        <h3>Status Legend</h3>
+        <ul>
+          <li>🟢 <strong>Active</strong> — branch is open and in use</li>
+          <li>✅ <strong>Committed</strong> — summary merged into trunk</li>
+          <li>🗑 <strong>Discarded</strong> — hidden from UI, content preserved</li>
+          <li>⬆️ <strong>Promoted</strong> — content moved to trunk, branch retired</li>
+          <li>⎇ <strong>Split</strong> — spun off as an independent conversation</li>
+        </ul>
+      </div>
+
+      <div class="guide-section">
+        <h2>🔍 Search & Filter</h2>
+        <p>Use the search bar at the top of the sidebar to find conversations, branches, or messages across your entire workspace.</p>
+
+        <h3>What Can Be Searched</h3>
+        <ul>
+          <li><strong>Conversation titles</strong> — matches in the main conversation name</li>
+          <li><strong>Branch/node labels</strong> — matches in custom branch names</li>
+          <li><strong>Message content</strong> — full-text search across all user and assistant messages</li>
+        </ul>
+
+        <h3>How to Search</h3>
+        <div class="step"><div class="step-num">1</div><div>Type at least 2 characters into the search input at the top of the sidebar.</div></div>
+        <div class="step"><div class="step-num">2</div><div>Results appear automatically after a short delay (300ms debounce).</div></div>
+        <div class="step"><div class="step-num">3</div><div>Results are grouped: conversation titles first, then node labels, then message snippets, sorted by date.</div></div>
+        <div class="step"><div class="step-num">4</div><div>Click any result to jump directly to that conversation, node, or message.</div></div>
+        <div class="step"><div class="step-num">5</div><div>Click the <strong>✕</strong> button or clear the input to return to the tree view.</div></div>
+
+        <h3>Search Results</h3>
+        <ul>
+          <li>Each result shows the <strong>conversation title</strong>, a <strong>snippet</strong> with your search term highlighted, and <strong>metadata</strong> (conversation, branch, role).</li>
+          <li>Limited to <strong>50 most relevant results</strong> to keep the interface responsive.</li>
+          <li>Message snippets include ~60 characters before and after the match for context.</li>
+        </ul>
+
+        <div class="info-box" style="margin-top:10px;">💡 Search is case-insensitive and matches partial words. Minimum 2 characters required.</div>
+      </div>
+
+      <div class="guide-section">
+        <h2>⚠️ Known Console Warnings (Safe to Ignore)</h2>
+        <p>When running from a local <code>file://</code> path, Chrome logs the following warning on every page load:</p>
+        <p><code>Unsafe attempt to load URL file://... 'file:' URLs are treated as unique security origins.</code></p>
+        <p>This is Chrome's internal logging of its own IndexedDB isolation mechanism — not an error in the app. It does not block fetch calls, does not affect LM Studio connectivity, and cannot be suppressed from application code. It is safe to ignore.</p>
+        <h3>If the app fails to load entirely</h3>
+        <p>This can happen if a previous IndexedDB upgrade was interrupted (e.g. closing the tab mid-load after a version update). Click <strong>⚙ Reset DB</strong> in the sidebar footer to clear the corrupted database and reload. Your conversation data will be lost but the app will recover cleanly.</p>
+      </div>
+
+      <div class="guide-section">
+        <h2>📋 Version History</h2>
+        <ul>
+          <li><strong>v1.3</strong> — 2026-03-22 — Added full-text search functionality: search across conversation titles, branch labels, and all message content. Search results with clickable navigation and contextual snippets. Improved sidebar usability.</li>
+          <li><strong>v1.2</strong> — 2026-03-22 — Fixed IndexedDB upgrade logic (duplicate index bug), added auto-recovery on DB failure, added ⚙ Reset DB button, added LM Studio connection diagnostics and 🔗 Test button, fixed CORS fetch headers for file:// origins.</li>
+          <li><strong>v1.0</strong> — 2026-03-22 — Initial release. Trunk + branch tree, fork panel, 4 lifecycle actions, IndexedDB persistence, LM Studio integration, context snapshots.</li>
+        </ul>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+
+<!-- Confirm Modal -->
+<div class="modal-overlay" id="confirmModal">
+  <div class="modal-box">
+    <h3 id="confirmTitle">Confirm Action</h3>
+    <p id="confirmMessage">Are you sure?</p>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="confirmCancel">Cancel</button>
+      <button class="btn btn-primary" id="confirmOk">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- SECTION:STATE + LOGIC:db + LOGIC:lmstudio + LOGIC:tree + LOGIC:branch + EVENTS + INIT -->
+<script>
+'use strict';
+
+// ── CONFIG ──────────────────────────────────────────────────────────────────
+const CFG = {
+  DB_NAME: 'orand_brancher',
+  DB_VERSION: 2,
+  MAX_BRANCHES_PER_FORK: 4,
+  BRANCH_CAN_BRANCH: false, // v1: off. Set true to unlock in future
+  BRANCH_COLORS: ['#e74c3c','#27ae60','#8e44ad','#e67e22'],
+  SUMMARY_MAX_TOKENS: 400,
+  LM_DEFAULT_URL: 'http://localhost:1234',
+};
+
+// ── STATE ────────────────────────────────────────────────────────────────────
+let db = null;
+let state = {
+  activeConvoId: null,
+  activeNodeId: null,   // trunk or branch nodeId
+  nodes: {},            // nodeId -> node object (cache)
+  messages: {},         // nodeId -> [messages] (cache)
+  forkTarget: null,     // messageIndex we're forking after
+  pendingForkBranches: [],
+  lmConnected: false,
+  searchQuery: '',      // Current search query
+  searchResults: [],    // Search results array
+  activeSearchHighlight: '', // Search term to highlight in messages
+};
+
+// ── UTILS ────────────────────────────────────────────────────────────────────
+function esc(str) {
+  return String(str)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function highlightInMessage(text, searchTerm) {
+  if (!searchTerm || searchTerm.length < 2) return esc(text);
+  const escaped = esc(text);
+  const regex = new RegExp('(' + searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi');
+  return escaped.replace(regex, '<span class="search-highlight">$1</span>');
+}
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+function ts() { return new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); }
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ── INDEXEDDB ────────────────────────────────────────────────────────────────
+async function initDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(CFG.DB_NAME, CFG.DB_VERSION);
+    req.onerror = () => {
+      // DB open failed — attempt recovery by deleting and recreating
+      console.warn('IndexedDB open failed, attempting recovery…', req.error);
+      const del = indexedDB.deleteDatabase(CFG.DB_NAME);
+      del.onsuccess = () => {
+        const req2 = indexedDB.open(CFG.DB_NAME, CFG.DB_VERSION);
+        req2.onerror = () => reject(req2.error);
+        req2.onsuccess = () => { db = req2.result; resolve(db); };
+        req2.onupgradeneeded = req.onupgradeneeded; // reuse same handler
+      };
+      del.onerror = () => reject(req.error);
+    };
+    req.onsuccess = () => { db = req.result; resolve(db); };
+    req.onblocked = () => {
+      // Another tab has the DB open at old version — notify user
+      console.warn('IndexedDB blocked — close other tabs with this app open');
+    };
+    req.onupgradeneeded = (e) => {
+      const d = e.target.result;
+      const oldVersion = e.oldVersion;
+
+      // ── Fresh install (oldVersion === 0) ──────────────────────────────────
+      if (!d.objectStoreNames.contains('conversations')) {
+        const cs = d.createObjectStore('conversations', { keyPath: 'id' });
+        cs.createIndex('createdAt','createdAt');
+      }
+      if (!d.objectStoreNames.contains('nodes')) {
+        const ns = d.createObjectStore('nodes', { keyPath: 'id' });
+        ns.createIndex('convoId','convoId');
+        ns.createIndex('status','status'); // include on fresh install
+      }
+      if (!d.objectStoreNames.contains('messages')) {
+        const ms = d.createObjectStore('messages', { keyPath: 'id' });
+        ms.createIndex('nodeId','nodeId');
+      }
+      if (!d.objectStoreNames.contains('snapshots')) {
+        const ss = d.createObjectStore('snapshots', { keyPath: 'id' });
+        ss.createIndex('nodeId','nodeId');
+      }
+      if (!d.objectStoreNames.contains('actionLog')) {
+        const al = d.createObjectStore('actionLog', { keyPath: 'id' });
+        al.createIndex('convoId','convoId');
+        al.createIndex('timestamp','timestamp');
+      }
+
+      // ── Upgrade from v1 → v2 (add status index to existing nodes store) ──
+      if (oldVersion === 1 && d.objectStoreNames.contains('nodes')) {
+        const ns = e.target.transaction.objectStore('nodes');
+        if (!ns.indexNames.contains('status')) {
+          ns.createIndex('status','status');
+        }
+      }
+    };
+  });
+}
+
+function dbTx(storeName, mode='readonly') {
+  const tx = db.transaction(storeName, mode);
+  return tx.objectStore(storeName);
+}
+
+function dbPut(store, obj) {
+  return new Promise((res,rej)=>{
+    const r = dbTx(store,'readwrite').put(obj);
+    r.onsuccess = ()=>res(r.result);
+    r.onerror = ()=>rej(r.error);
+  });
+}
+
+function dbGet(store, key) {
+  return new Promise((res,rej)=>{
+    const r = dbTx(store).get(key);
+    r.onsuccess = ()=>res(r.result);
+    r.onerror = ()=>rej(r.error);
+  });
+}
+
+function dbDelete(store, key) {
+  return new Promise((res,rej)=>{
+    const r = dbTx(store,'readwrite').delete(key);
+    r.onsuccess = ()=>res();
+    r.onerror = ()=>rej(r.error);
+  });
+}
+
+function dbGetAllByIndex(store, indexName, value) {
+  return new Promise((res,rej)=>{
+    const r = dbTx(store).index(indexName).getAll(value);
+    r.onsuccess = ()=>res(r.result);
+    r.onerror = ()=>rej(r.error);
+  });
+}
+
+async function dbClearAll() {
+  const stores = ['conversations','nodes','messages','snapshots','actionLog'];
+  for (const s of stores) {
+    await new Promise((res,rej)=>{
+      const r = dbTx(s,'readwrite').clear();
+      r.onsuccess = ()=>res(); r.onerror = ()=>rej(r.error);
+    });
+  }
+}
+
+// ── ACTION LOG ────────────────────────────────────────────────────────────────
+async function logAction(convoId, action, branchId, branchLabel, detail, extra = {}) {
+  const entry = {
+    id: uid(),
+    convoId,
+    action,       // 'fork_created'|'discarded'|'committed'|'promoted'|'split'
+    branchId,
+    branchLabel,
+    detail,
+    timestamp: Date.now(),
+    ...extra,
+  };
+  await dbPut('actionLog', entry);
+  return entry;
+}
+
+// ── LM STUDIO ─────────────────────────────────────────────────────────────────
+function getLMUrl() { return document.getElementById('lmUrl').value.trim().replace(/\/$/,''); }
+function getModel() { return document.getElementById('modelSelect').value; }
+
+async function refreshModels() {
+  const btn = document.getElementById('refreshModelsBtn');
+  const dot = document.getElementById('lmStatusDot');
+  const txt = document.getElementById('lmStatusText');
+  btn.textContent = '⏳';
+  btn.disabled = true;
+  dot.className = '';
+  txt.textContent = 'Connecting…';
+  try {
+    let resp;
+    try {
+      resp = await fetch(`${getLMUrl()}/v1/models`, {
+        method: 'GET',
+        mode: 'cors',
+        credentials: 'omit',
+      });
+    } catch(fetchErr) {
+      // Distinguish between refused connection and CORS block
+      const msg = fetchErr.message || '';
+      if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('fetch')) {
+        throw new Error('CORS_OR_REFUSED');
+      }
+      throw fetchErr;
+    }
+    if (!resp.ok) throw new Error(`HTTP ${resp.status} — check LM Studio server`);
+    const data = await resp.json();
+    const models = data.data || [];
+    const sel = document.getElementById('modelSelect');
+    sel.innerHTML = '<option value="">— select model —</option>';
+    models.forEach(m => {
+      const o = document.createElement('option');
+      o.value = m.id; o.textContent = m.id;
+      sel.appendChild(o);
+    });
+    if (models.length) sel.selectedIndex = 1;
+    dot.className = 'connected';
+    txt.textContent = `${models.length} model(s) available`;
+    state.lmConnected = true;
+    updateModelBadge();
+  } catch(e) {
+    dot.className = 'error';
+    if (e.message === 'CORS_OR_REFUSED') {
+      txt.innerHTML = `Can't reach LM Studio — <a href="#" id="lmDiagLink" style="color:var(--blue)">see fix</a>`;
+      setTimeout(() => {
+        const link = document.getElementById('lmDiagLink');
+        if (link) link.addEventListener('click', (ev) => { ev.preventDefault(); showLMDiag(); });
+      }, 50);
+    } else {
+      txt.textContent = `Error: ${e.message}`;
+    }
+    state.lmConnected = false;
+  } finally {
+    btn.textContent = '↻ Refresh';
+    btn.disabled = false;
+  }
+}
+
+function showLMDiag() {
+  const url = getLMUrl();
+  const diagMsg =
+`LM Studio connection checklist:
+
+1. Is LM Studio open and running?
+
+2. Is the Local Server started?
+   → In LM Studio: click "Local Server" tab → "Start Server"
+   → Default address: http://localhost:1234
+
+3. Is CORS enabled?
+   → In LM Studio server settings, enable:
+     "Allow requests from any origin" (CORS checkbox)
+   → This is required for file:// pages to connect
+
+4. Is a model loaded?
+   → Load a model in LM Studio before starting the server
+
+5. Verify manually:
+   → Open ${url}/v1/models in your browser
+   → You should see a JSON list of models
+
+Current URL configured: ${url}`;
+  alert(diagMsg);
+}
+
+function updateModelBadge() {
+  const m = getModel();
+  document.getElementById('modelBadge').textContent = m ? m.split('/').pop().slice(0,28) : 'No model';
+}
+
+async function callLM(messages, systemPrompt) {
+  const url = `${getLMUrl()}/v1/chat/completions`;
+  const model = getModel();
+  if (!model) throw new Error('No model selected');
+  const body = {
+    model,
+    messages: systemPrompt
+      ? [{ role:'system', content: systemPrompt }, ...messages]
+      : messages,
+    temperature: 0.7,
+    max_tokens: 2048,
+    stream: false,
+  };
+  const resp = await fetch(url, {
+    method: 'POST',
+    mode: 'cors',
+    credentials: 'omit',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) {
+    const t = await resp.text();
+    throw new Error(`LM Studio error ${resp.status}: ${t.slice(0,200)}`);
+  }
+  const data = await resp.json();
+  return data.choices?.[0]?.message?.content || '';
+}
+
+async function generateSummary(messages) {
+  const transcript = messages
+    .map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
+    .join('\n');
+  const prompt = `Summarize the following conversation in 3-5 concise sentences, capturing the key topics, decisions, and context needed to continue meaningfully:\n\n${transcript}`;
+  try {
+    return await callLM([{ role:'user', content: prompt }]);
+  } catch(e) {
+    return `[Summary unavailable: ${e.message}]`;
+  }
+}
+
+// ── CONVERSATION MANAGEMENT ──────────────────────────────────────────────────
+async function createConversation(title) {
+  const id = uid();
+  const convo = { id, title: title || `Conversation ${new Date().toLocaleString()}`, createdAt: Date.now() };
+  await dbPut('conversations', convo);
+
+  // Create trunk node
+  const trunkId = uid();
+  const trunk = {
+    id: trunkId, convoId: id,
+    parentId: null, forkAfterMsgIdx: null,
+    label: 'Trunk', color: '#0097d7',
+    isTrunk: true, canBranch: true,
+    forks: [], // [{forkMsgIdx, branchIds:[]}]
+    createdAt: Date.now(),
+  };
+  await dbPut('nodes', trunk);
+  state.nodes[trunkId] = trunk;
+  state.messages[trunkId] = [];
+
+  state.activeConvoId = id;
+  await setActiveNode(trunkId);
+  await renderTree();
+  return { convo, trunkId };
+}
+
+async function loadConversation(convoId, preserveSearchHighlight = false) {
+  state.activeConvoId = convoId;
+  // Load all nodes for this conversation
+  const nodes = await dbGetAllByIndex('nodes','convoId', convoId);
+  state.nodes = {};
+  nodes.forEach(n => state.nodes[n.id] = n);
+  state.messages = {};
+  // Find trunk
+  const trunk = nodes.find(n => n.isTrunk);
+  if (trunk) await setActiveNode(trunk.id, preserveSearchHighlight);
+  await renderTree();
+}
+
+async function getMessages(nodeId) {
+  if (!state.messages[nodeId]) {
+    const msgs = await dbGetAllByIndex('messages','nodeId', nodeId);
+    msgs.sort((a,b) => a.createdAt - b.createdAt);
+    state.messages[nodeId] = msgs;
+  }
+  return state.messages[nodeId];
+}
+
+async function addMessage(nodeId, role, content) {
+  const msg = { id: uid(), nodeId, role, content, createdAt: Date.now() };
+  await dbPut('messages', msg);
+  if (!state.messages[nodeId]) state.messages[nodeId] = [];
+  state.messages[nodeId].push(msg);
+  return msg;
+}
+
+async function setActiveNode(nodeId, preserveSearchHighlight = false) {
+  state.activeNodeId = nodeId;
+  // Clear search highlighting unless explicitly preserving (e.g., from search result click)
+  if (!preserveSearchHighlight && state.activeSearchHighlight) {
+    state.activeSearchHighlight = '';
+  }
+  await renderChat();
+  renderTreeHighlight();
+}
+
+// ── FORK LOGIC ───────────────────────────────────────────────────────────────
+async function openForkPanel(afterMsgIdx) {
+  state.forkTarget = afterMsgIdx;
+  state.pendingForkBranches = [];
+  const panel = document.getElementById('forkPanel');
+  const list = document.getElementById('forkBranchList');
+  list.innerHTML = '';
+  panel.classList.add('visible');
+  addBranchRow();
+  addBranchRow();
+  document.getElementById('addForkBtn').disabled = true;
+}
+
+function closeForkPanel() {
+  document.getElementById('forkPanel').classList.remove('visible');
+  document.getElementById('addForkBtn').disabled = false;
+  state.forkTarget = null;
+  state.pendingForkBranches = [];
+}
+
+function addBranchRow() {
+  const list = document.getElementById('forkBranchList');
+  const rows = list.querySelectorAll('.fork-branch-row');
+  if (rows.length >= CFG.MAX_BRANCHES_PER_FORK) return;
+  const idx = rows.length;
+  const color = CFG.BRANCH_COLORS[idx];
+  const row = document.createElement('div');
+  row.className = 'fork-branch-row';
+  row.dataset.idx = idx;
+  row.innerHTML = `
+    <div class="fork-branch-color" style="background:${color}"></div>
+    <input class="fork-branch-input" type="text" placeholder="Branch ${idx+1}: enter a prompt to explore…" />
+    <button class="fork-branch-remove" title="Remove">×</button>
+  `;
+  row.querySelector('.fork-branch-remove').addEventListener('click', () => {
+    row.remove();
+    renumberForkRows();
+  });
+  list.appendChild(row);
+  row.querySelector('input').focus();
+}
+
+function renumberForkRows() {
+  const rows = document.querySelectorAll('.fork-branch-row');
+  rows.forEach((r, i) => {
+    r.dataset.idx = i;
+    r.querySelector('.fork-branch-color').style.background = CFG.BRANCH_COLORS[i];
+    r.querySelector('input').placeholder = `Branch ${i+1}: enter a prompt to explore…`;
+  });
+}
+
+async function launchBranches() {
+  const nodeId = state.activeNodeId;
+  const node = state.nodes[nodeId];
+  if (!node) return;
+
+  const rows = document.querySelectorAll('.fork-branch-row input');
+  const prompts = Array.from(rows).map(i => i.value.trim()).filter(Boolean);
+  if (!prompts.length) { alert('Add at least one branch prompt.'); return; }
+
+  const btn = document.getElementById('submitForkBtn');
+  btn.disabled = true; btn.textContent = '⏳ Launching…';
+
+  const forkMsgIdx = state.forkTarget;
+  const msgs = await getMessages(nodeId);
+  const msgsUpToFork = msgs.slice(0, forkMsgIdx + 1);
+
+  // Generate summary once for all branches
+  let summary = '';
+  if (msgsUpToFork.length > 0) {
+    summary = await generateSummary(msgsUpToFork);
+  }
+
+  // Register fork on trunk node
+  const forkEntry = { forkMsgIdx, branchIds: [] };
+
+  const branchIds = [];
+  for (let i = 0; i < prompts.length; i++) {
+    const color = CFG.BRANCH_COLORS[i];
+    const branchId = uid();
+    const branch = {
+      id: branchId,
+      convoId: node.convoId,
+      parentId: nodeId,
+      forkAfterMsgIdx: forkMsgIdx,
+      label: `Branch ${String.fromCharCode(65+i)}`,
+      color,
+      isTrunk: false,
+      canBranch: CFG.BRANCH_CAN_BRANCH,
+      forks: [],
+      resolved: false,
+      status: 'active',
+      createdAt: Date.now(),
+    };
+    await dbPut('nodes', branch);
+    state.nodes[branchId] = branch;
+    state.messages[branchId] = [];
+
+    // Save snapshot
+    const snap = { id: uid(), nodeId: branchId, summary, rawCount: msgsUpToFork.length, model: getModel(), createdAt: Date.now() };
+    await dbPut('snapshots', snap);
+
+    // Add context note as first message
+    if (summary) {
+      await addMessage(branchId, 'system', `📌 Context snapshot (${msgsUpToFork.length} messages):\n${summary}`);
+    }
+
+    // Add user prompt and get LLM reply
+    await addMessage(branchId, 'user', prompts[i]);
+    branchIds.push(branchId);
+    forkEntry.branchIds.push(branchId);
+  }
+
+  // Update parent node forks list
+  node.forks.push(forkEntry);
+  await dbPut('nodes', node);
+
+  // Log fork creation
+  const branchLabels = branchIds.map(bid => state.nodes[bid]?.label).join(', ');
+  await logAction(node.convoId, 'fork_created', null, null,
+    `Fork at msg ${forkMsgIdx + 1} — created: ${branchLabels}`,
+    { forkMsgIdx, branchIds });
+
+  // Send LM requests for all branches (parallel)
+  const lmCalls = branchIds.map(async (bid) => {
+    const branchMsgs = await getMessages(bid);
+    const apiMsgs = branchMsgs
+      .filter(m => m.role !== 'system')
+      .map(m => ({ role: m.role, content: m.content }));
+    const systemNote = summary ? `Context from parent conversation:\n${summary}` : undefined;
+    try {
+      const reply = await callLM(apiMsgs, systemNote);
+      await addMessage(bid, 'assistant', reply);
+    } catch(e) {
+      await addMessage(bid, 'assistant', `[Error: ${e.message}]`);
+    }
+  });
+  await Promise.all(lmCalls);
+
+  closeForkPanel();
+  await renderTree();
+  // Switch to first branch
+  await setActiveNode(branchIds[0]);
+
+  btn.disabled = false; btn.textContent = 'Launch Branches →';
+}
+
+// ── BRANCH LIFECYCLE ACTIONS ─────────────────────────────────────────────────
+async function discardBranch(nodeId) {
+  const node = state.nodes[nodeId];
+  if (!node || node.isTrunk) return;
+  await confirm('Discard Branch', 'This branch will be hidden from the tree but preserved in the audit log and export. Continue?', async () => {
+    // Soft-delete: mark status, keep all messages intact
+    node.status = 'discarded';
+    node.resolvedAt = Date.now();
+    await dbPut('nodes', node);
+    state.nodes[nodeId] = node;
+
+    await logAction(node.convoId, 'discarded', nodeId, node.label,
+      `Branch "${node.label}" discarded (${(await getMessages(nodeId)).filter(m=>m.role!=='system').length} messages preserved)`);
+
+    // Switch to trunk
+    const trunk = Object.values(state.nodes).find(n => n.isTrunk && n.convoId === node.convoId);
+    if (trunk) await setActiveNode(trunk.id);
+    await renderTree();
+  });
+}
+
+async function commitBranch(nodeId) {
+  const node = state.nodes[nodeId];
+  if (!node || node.isTrunk) return;
+  await confirm('Commit to Main', 'Summarize this branch and add it as context to the trunk?', async () => {
+    const msgs = await getMessages(nodeId);
+    const convoMsgs = msgs.filter(m => m.role !== 'system');
+    const summary = await generateSummary(convoMsgs);
+    const trunk = Object.values(state.nodes).find(n => n.isTrunk && n.convoId === node.convoId);
+    if (!trunk) return;
+    const commitNote = `📌 Committed branch "${node.label}":\n${summary}`;
+    await addMessage(trunk.id, 'assistant', commitNote);
+    // Soft-delete
+    node.resolved = true;
+    node.status = 'committed';
+    node.resolvedAt = Date.now();
+    node.commitSummary = summary;
+    await dbPut('nodes', node);
+    state.nodes[nodeId] = node;
+
+    await logAction(node.convoId, 'committed', nodeId, node.label,
+      `Branch "${node.label}" committed — summary added to trunk`, { summary });
+
+    await setActiveNode(trunk.id);
+    await renderTree();
+  });
+}
+
+async function promoteBranch(nodeId) {
+  const node = state.nodes[nodeId];
+  if (!node || node.isTrunk) return;
+  await confirm('Promote to Main', 'This branch becomes the trunk. Sibling branches at this fork will be soft-deleted (preserved in audit). Continue?', async () => {
+    const parent = state.nodes[node.parentId];
+    const forkEntry = parent?.forks.find(f => f.branchIds.includes(nodeId));
+    const discardedSibLabels = [];
+
+    // Soft-delete siblings
+    if (forkEntry) {
+      for (const sibId of forkEntry.branchIds) {
+        if (sibId === nodeId) continue;
+        const sib = state.nodes[sibId];
+        if (!sib) continue;
+        sib.status = 'discarded';
+        sib.resolvedAt = Date.now();
+        await dbPut('nodes', sib);
+        state.nodes[sibId] = sib;
+        discardedSibLabels.push(sib.label);
+        await logAction(node.convoId, 'discarded', sibId, sib.label,
+          `Auto-discarded as sibling of promoted branch "${node.label}"`);
+      }
+    }
+
+    // Copy branch messages to trunk after fork point
+    const trunk = Object.values(state.nodes).find(n => n.isTrunk && n.convoId === node.convoId);
+    if (!trunk) return;
+    const trunkMsgs = await getMessages(trunk.id);
+    const toDelete = trunkMsgs.filter((m, idx) => idx > (node.forkAfterMsgIdx ?? trunkMsgs.length));
+    for (const m of toDelete) {
+      await dbDelete('messages', m.id);
+      const i = state.messages[trunk.id]?.indexOf(m);
+      if (i > -1) state.messages[trunk.id].splice(i, 1);
+    }
+    const branchMsgs = (await getMessages(nodeId)).filter(m => m.role !== 'system');
+    for (const m of branchMsgs) await addMessage(trunk.id, m.role, m.content);
+    // Invalidate trunk message cache
+    delete state.messages[trunk.id];
+
+    // Soft-delete this branch (its content now lives on trunk)
+    node.status = 'promoted';
+    node.resolvedAt = Date.now();
+    await dbPut('nodes', node);
+    state.nodes[nodeId] = node;
+
+    if (parent && forkEntry) {
+      parent.forks = parent.forks.filter(f => f !== forkEntry);
+      await dbPut('nodes', parent);
+    }
+
+    await logAction(node.convoId, 'promoted', nodeId, node.label,
+      `Branch "${node.label}" promoted to trunk from msg ${node.forkAfterMsgIdx + 1}` +
+      (discardedSibLabels.length ? ` — discarded siblings: ${discardedSibLabels.join(', ')}` : ''));
+
+    await setActiveNode(trunk.id);
+    await renderTree();
+  });
+}
+
+async function splitToNewTree(nodeId) {
+  const node = state.nodes[nodeId];
+  if (!node || node.isTrunk) return;
+  await confirm('Split to New Tree', 'This branch becomes an independent new conversation. It will be hidden from this tree but preserved in the audit log.', async () => {
+    const msgs = await getMessages(nodeId);
+    const { trunkId, convo } = await createConversation(`Split: ${node.label} (${new Date().toLocaleDateString()})`);
+    for (const m of msgs.filter(mm => mm.role !== 'system')) {
+      await addMessage(trunkId, m.role, m.content);
+    }
+    // Soft-delete from original tree
+    node.status = 'split';
+    node.resolvedAt = Date.now();
+    node.splitToConvoId = convo.id;
+    await dbPut('nodes', node);
+    state.nodes[nodeId] = node;
+
+    await logAction(node.convoId, 'split', nodeId, node.label,
+      `Branch "${node.label}" split into new conversation "${convo.title}"`,
+      { newConvoId: convo.id });
+
+    await renderTree();
+    await setActiveNode(trunkId);
+  });
+}
+
+// ── RENDERING ────────────────────────────────────────────────────────────────
+async function renderTree() {
+  const container = document.getElementById('treeContainer');
+  if (!state.activeConvoId) {
+    container.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:12px;">No conversations yet.<br>Start a new one above.</div>';
+    return;
+  }
+
+  // Load all conversations for switcher
+  const convos = await new Promise((res,rej)=>{
+    const r = dbTx('conversations').getAll();
+    r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error);
+  });
+  convos.sort((a,b)=>b.createdAt-a.createdAt);
+
+  let html = '';
+
+  for (const convo of convos) {
+    const nodes = await dbGetAllByIndex('nodes','convoId', convo.id);
+    const trunk = nodes.find(n=>n.isTrunk);
+    if (!trunk) continue;
+
+    const isActiveConvo = convo.id === state.activeConvoId;
+    html += `<div class="tree-node ${trunk.id === state.activeNodeId ? 'active':''}" data-node="${trunk.id}" data-convo="${convo.id}" style="border-left-color:${isActiveConvo?'var(--blue)':'transparent'}">
+      <div class="node-dot" style="background:#0097d7"></div>
+      <div class="node-label" title="${esc(convo.title)}">${esc(convo.title)}</div>
+      <button class="node-edit-btn" data-rename-convo="${convo.id}" title="Rename conversation">✏</button>
+      <span class="node-badge trunk">TRUNK</span>
+    </div>`;
+
+    if (isActiveConvo) {
+      // Render forks and branches
+      for (const fork of (trunk.forks || [])) {
+        const forkMsgCount = fork.forkMsgIdx + 1;
+        // Count active branches for this fork
+        const activeBranches = fork.branchIds.filter(bid => {
+          const bn = state.nodes[bid] || nodes.find(n=>n.id===bid);
+          return bn && (!bn.status || bn.status === 'active' || bn.status === 'committed');
+        });
+        if (activeBranches.length === 0) continue; // hide fork if all branches resolved
+        html += `<div class="fork-connector">fork @ msg ${forkMsgCount}</div>`;
+        for (const bid of fork.branchIds) {
+          const bn = state.nodes[bid] || nodes.find(n=>n.id===bid);
+          if (!bn) continue;
+          // Hide discarded/promoted/split from active tree
+          if (bn.status === 'discarded' || bn.status === 'promoted' || bn.status === 'split') continue;
+          const statusIcon = bn.status === 'committed' ? ' ✓' : '';
+          const label = bn.label + statusIcon;
+          html += `<div class="tree-node branch-node ${bn.id === state.activeNodeId ? 'active':''}" data-node="${bn.id}" data-convo="${convo.id}" style="${bn.id===state.activeNodeId?'border-left-color:'+bn.color:''}">
+            <div class="node-dot" style="background:${bn.color}"></div>
+            <div class="node-label">${esc(label)}</div>
+            <button class="node-edit-btn" data-rename-branch="${bn.id}" title="Rename branch">✏</button>
+            <span class="node-badge" style="background:${bn.color}22;color:${bn.color}">BR</span>
+          </div>`;
+        }
+      }
+    }
+  }
+
+  container.innerHTML = html || '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:12px;">No conversations yet.</div>';
+
+
+  // Bind node clicks (only on the node itself, not the edit button)
+  container.querySelectorAll('[data-node]').forEach(el => {
+    el.addEventListener('click', async (e) => {
+      if (e.target.closest('.node-edit-btn')) return; // handled separately
+      const nid = el.dataset.node;
+      const cid = el.dataset.convo;
+      if (cid !== state.activeConvoId) {
+        await loadConversation(cid);
+      } else {
+        await setActiveNode(nid);
+      }
+    });
+  });
+
+  // Bind rename buttons
+  container.querySelectorAll('[data-rename-convo]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      startInlineRename(btn, 'convo', btn.dataset.renameConvo);
+    });
+  });
+  container.querySelectorAll('[data-rename-branch]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      startInlineRename(btn, 'branch', btn.dataset.renameBranch);
+    });
+  });
+}
+
+function startInlineRename(editBtn, type, id) {
+  const treeNode = editBtn.closest('.tree-node');
+  const labelEl = treeNode.querySelector('.node-label');
+  const currentText = type === 'convo'
+    ? (Object.values(state.nodes).find(n=>n.convoId===id && n.isTrunk) ? labelEl.title || labelEl.textContent : labelEl.textContent)
+    : (state.nodes[id]?.label || labelEl.textContent);
+
+  // Replace label with input
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'node-label-input';
+  input.value = (labelEl.title || currentText).replace(' ✓','').trim();
+  labelEl.replaceWith(input);
+  editBtn.style.display = 'none';
+  input.focus();
+  input.select();
+
+  const finish = async (save) => {
+    const newVal = input.value.trim();
+    if (save && newVal) {
+      if (type === 'convo') await renameConversation(id, newVal);
+      else await renameBranch(id, newVal);
+    } else {
+      await renderTree(); // restore
+    }
+  };
+
+  input.addEventListener('keydown', async (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); await finish(true); }
+    if (e.key === 'Escape') { e.preventDefault(); await finish(false); }
+  });
+  input.addEventListener('blur', () => finish(true));
+}
+
+async function renameConversation(convoId, newTitle) {
+  const convo = await dbGet('conversations', convoId);
+  if (!convo) return;
+  convo.title = newTitle;
+  await dbPut('conversations', convo);
+  await renderTree();
+  // Update chat header if this is active trunk
+  const node = state.nodes[state.activeNodeId];
+  if (node?.isTrunk && node.convoId === convoId) {
+    document.getElementById('chatNodeTitle').textContent = 'Main Conversation';
+  }
+}
+
+async function renameBranch(nodeId, newLabel) {
+  const node = state.nodes[nodeId];
+  if (!node) return;
+  node.label = newLabel;
+  await dbPut('nodes', node);
+  await renderTree();
+  // Update chat header if this branch is active
+  if (state.activeNodeId === nodeId) {
+    document.getElementById('chatNodeTitle').textContent = newLabel;
+    document.getElementById('chatContextBadge').textContent = newLabel.toUpperCase();
+  }
+}
+
+function renderTreeHighlight() {
+  document.querySelectorAll('[data-node]').forEach(el => {
+    const active = el.dataset.node === state.activeNodeId;
+    el.classList.toggle('active', active);
+    const node = state.nodes[el.dataset.node];
+    if (active && node && !node.isTrunk) {
+      el.style.borderLeftColor = node.color;
+    } else if (!active) {
+      el.style.borderLeftColor = '';
+    }
+  });
+}
+
+async function renderChat() {
+  const nodeId = state.activeNodeId;
+  if (!nodeId) return;
+  const node = state.nodes[nodeId];
+  if (!node) return;
+
+  // Header
+  const badge = document.getElementById('chatContextBadge');
+  const title = document.getElementById('chatNodeTitle');
+  const desc = document.getElementById('chatNodeDesc');
+
+  if (node.isTrunk) {
+    badge.style.cssText = 'background:var(--blue-light);color:var(--blue);';
+    badge.textContent = 'TRUNK';
+    title.textContent = 'Main Conversation';
+    desc.textContent = `${(node.forks||[]).length} fork(s) created`;
+    ['btnDiscard','btnCommit','btnPromote','btnSplit'].forEach(id => {
+      document.getElementById(id).classList.remove('visible');
+    });
+  } else {
+    badge.style.cssText = `background:${node.color}22;color:${node.color};`;
+    badge.textContent = node.label.toUpperCase();
+    title.textContent = node.label;
+    desc.textContent = node.resolved ? 'Resolved' : 'Active branch';
+    ['btnDiscard','btnCommit','btnPromote','btnSplit'].forEach(id => {
+      document.getElementById(id).classList.toggle('visible', !node.resolved);
+    });
+  }
+
+  // Messages
+  const msgs = await getMessages(nodeId);
+  const area = document.getElementById('messagesArea');
+
+  if (!msgs.length) {
+    area.innerHTML = '<div id="emptyState"><div class="empty-icon">💬</div><p>No messages yet. Type below to start.</p></div>';
+    return;
+  }
+
+  let html = '';
+
+  // If branch, show context note
+  if (!node.isTrunk) {
+    html += `<div class="context-note">⎇ Branch from main trunk · Context snapshot inherited</div>`;
+  }
+
+  // Show fork markers on trunk
+  const forksByIdx = {};
+  if (node.isTrunk) {
+    for (const fork of (node.forks||[])) {
+      forksByIdx[fork.forkMsgIdx] = fork;
+    }
+  }
+
+  msgs.forEach((msg, idx) => {
+    if (msg.role === 'system') {
+      // Show context snapshot note nicely
+      const shortContent = msg.content.length > 180 ? msg.content.slice(0,180)+'…' : msg.content;
+      html += `<div class="context-note">${esc(shortContent)}</div>`;
+      return;
+    }
+
+    const isUser = msg.role === 'user';
+    const time = new Date(msg.createdAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+
+    // Apply search highlighting if active
+    const contentHtml = state.activeSearchHighlight 
+      ? highlightInMessage(msg.content, state.activeSearchHighlight)
+      : esc(msg.content);
+
+    html += `<div class="message-wrap ${isUser?'user':'assistant'}">
+      <div class="message-bubble">${contentHtml}</div>
+      <div class="message-meta">${time}</div>
+      ${!isUser && node.isTrunk ? `<button class="msg-fork-btn" data-msgidx="${idx}">⎇ Fork here</button>` : ''}
+    </div>`;
+
+    // Fork marker after this message if a fork exists
+    if (forksByIdx[idx]) {
+      const f = forksByIdx[idx];
+      const bNames = f.branchIds.map(bid => state.nodes[bid]?.label || '?').join(', ');
+      html += `<div class="fork-marker"><span class="fork-marker-label">⎇ Fork · ${bNames}</span></div>`;
+    }
+  });
+
+  area.innerHTML = html;
+  area.scrollTop = area.scrollHeight;
+
+  // Bind fork buttons on messages
+  area.querySelectorAll('.msg-fork-btn').forEach(btn => {
+    btn.addEventListener('click', () => openForkPanel(parseInt(btn.dataset.msgidx)));
+  });
+
+  // Update addForkBtn
+  const hasMsgs = msgs.filter(m=>m.role==='assistant').length > 0;
+  document.getElementById('addForkBtn').disabled = !hasMsgs || !node.isTrunk;
+}
+
+function showTyping() {
+  const area = document.getElementById('messagesArea');
+  const div = document.createElement('div');
+  div.id = 'typingIndicator';
+  div.className = 'message-wrap assistant';
+  div.innerHTML = `<div class="message-bubble"><div class="typing-indicator"><span></span><span></span><span></span></div></div>`;
+  area.appendChild(div);
+  area.scrollTop = area.scrollHeight;
+}
+
+function removeTyping() {
+  document.getElementById('typingIndicator')?.remove();
+}
+
+async function sendMessage() {
+  const input = document.getElementById('userInput');
+  const text = input.value.trim();
+  if (!text) return;
+  if (!state.activeNodeId) { alert('Start or select a conversation first.'); return; }
+  if (!getModel()) { alert('Select a model first.'); return; }
+
+  input.value = '';
+  input.style.height = 'auto';
+  document.getElementById('sendBtn').disabled = true;
+
+  const nodeId = state.activeNodeId;
+  await addMessage(nodeId, 'user', text);
+  await renderChat();
+  showTyping();
+
+  try {
+    const msgs = await getMessages(nodeId);
+    const node = state.nodes[nodeId];
+    const apiMsgs = msgs
+      .filter(m => m.role !== 'system')
+      .map(m => ({ role: m.role, content: m.content }));
+
+    // For branches, prepend snapshot as system message
+    let systemNote = undefined;
+    if (!node.isTrunk) {
+      const snaps = await dbGetAllByIndex('snapshots','nodeId', nodeId);
+      if (snaps.length) systemNote = `Context from parent conversation:\n${snaps[0].summary}`;
+    }
+
+    const reply = await callLM(apiMsgs, systemNote);
+    removeTyping();
+    await addMessage(nodeId, 'assistant', reply);
+    await renderChat();
+  } catch(e) {
+    removeTyping();
+    await addMessage(nodeId, 'assistant', `[Error: ${e.message}]`);
+    await renderChat();
+  }
+
+  document.getElementById('sendBtn').disabled = false;
+  input.focus();
+}
+
+// ── MD EXPORT ─────────────────────────────────────────────────────────────────
+async function exportConversationMD() {
+  if (!state.activeConvoId) { alert('No conversation selected.'); return; }
+
+  const btn = document.getElementById('exportMdBtn');
+  btn.textContent = '⏳ Generating…'; btn.disabled = true;
+
+  try {
+    const convo = await dbGet('conversations', state.activeConvoId);
+    const allNodes = await dbGetAllByIndex('nodes', 'convoId', state.activeConvoId);
+    const trunk = allNodes.find(n => n.isTrunk);
+    const branches = allNodes.filter(n => !n.isTrunk);
+    const actionEntries = await dbGetAllByIndex('actionLog', 'convoId', state.activeConvoId);
+    actionEntries.sort((a, b) => a.timestamp - b.timestamp);
+
+    const exportDate = new Date().toLocaleString();
+    const safeTitle = (convo.title || 'conversation')
+      .toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40);
+    const fileName = `${safeTitle}_${new Date().toISOString().slice(0,10)}.md`;
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+    const fmtTime = (ts) => new Date(ts).toLocaleString([], {
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit'
+    });
+    const statusEmoji = { active: '🟢', committed: '✅', discarded: '🗑', promoted: '⬆️', split: '⎇' };
+    const actionLabel = {
+      fork_created: '🌿 FORK CREATED',
+      committed:    '↩ COMMITTED',
+      discarded:    '✕ DISCARDED',
+      promoted:     '⬆ PROMOTED',
+      split:        '⎇ SPLIT',
+    };
+
+    // ── build conversation tree ASCII ────────────────────────────────────────
+    function buildTreeASCII() {
+      let lines = [];
+      lines.push(`TRUNK ── ${convo.title}`);
+      for (const fork of (trunk?.forks || [])) {
+        lines.push(`  │`);
+        lines.push(`  ├── fork @ message ${fork.forkMsgIdx + 1}`);
+        fork.branchIds.forEach((bid, i) => {
+          const bn = allNodes.find(n => n.id === bid);
+          if (!bn) return;
+          const isLast = i === fork.branchIds.length - 1;
+          const connector = isLast ? '└──' : '├──';
+          const st = bn.status || 'active';
+          const emoji = statusEmoji[st] || '●';
+          lines.push(`  │   ${connector} ${emoji} [${bn.label}]  [${st.toUpperCase()}]`);
+        });
+      }
+      return lines.join('\n');
+    }
+
+    // ── format messages for a node ───────────────────────────────────────────
+    async function formatNodeMessages(nodeId, prefix) {
+      const msgs = await getMessages(nodeId);
+      const visible = msgs.filter(m => m.role !== 'system');
+      if (!visible.length) return '_No messages._\n';
+      let out = '';
+      visible.forEach((m, i) => {
+        const role = m.role === 'user' ? '**🧑 User**' : '**🤖 Assistant**';
+        const time = fmtTime(m.createdAt);
+        out += `${role} · ${time}\n\n${m.content}\n\n`;
+        if (i < visible.length - 1) out += '---\n\n';
+      });
+      return out;
+    }
+
+    // ── assemble MD ──────────────────────────────────────────────────────────
+    let md = '';
+
+    // Header
+    md += `# ORAND Conversation Brancher — Export\n\n`;
+    md += `| Field | Value |\n|---|---|\n`;
+    md += `| **Conversation** | ${convo.title} |\n`;
+    md += `| **Exported** | ${exportDate} |\n`;
+    md += `| **Model** | ${getModel() || 'unknown'} |\n`;
+    md += `| **Trunk messages** | ${(await getMessages(trunk.id)).filter(m=>m.role!=='system').length} |\n`;
+    md += `| **Branches** | ${branches.length} (${branches.filter(b=>b.status==='active').length} active) |\n`;
+    md += `| **Fork points** | ${(trunk?.forks||[]).length} |\n\n`;
+    md += `---\n\n`;
+
+    // Conversation Tree
+    md += `## 🌲 Conversation Tree\n\n`;
+    md += '```\n' + buildTreeASCII() + '\n```\n\n';
+
+    // Status legend
+    md += `**Status Legend:** 🟢 Active · ✅ Committed · 🗑 Discarded · ⬆️ Promoted · ⎇ Split\n\n`;
+    md += `---\n\n`;
+
+    // Action History
+    md += `## 📋 Action History\n\n`;
+    if (actionEntries.length === 0) {
+      md += '_No actions recorded yet._\n\n';
+    } else {
+      md += `| # | Timestamp | Action | Branch | Detail |\n`;
+      md += `|---|-----------|--------|--------|--------|\n`;
+      actionEntries.forEach((entry, i) => {
+        const label = actionLabel[entry.action] || entry.action.toUpperCase();
+        const branch = entry.branchLabel ? `\`${entry.branchLabel}\`` : '—';
+        const detail = (entry.detail || '').replace(/\|/g, '\\|');
+        md += `| ${i+1} | ${fmtTime(entry.timestamp)} | ${label} | ${branch} | ${detail} |\n`;
+      });
+      md += `\n`;
+    }
+    md += `---\n\n`;
+
+    // Trunk Conversation
+    md += `## 💬 Trunk Conversation\n\n`;
+    if (trunk) {
+      // Annotate fork points inline
+      const trunkMsgs = await getMessages(trunk.id);
+      const forksByMsgIdx = {};
+      for (const fork of (trunk.forks || [])) {
+        forksByMsgIdx[fork.forkMsgIdx] = fork;
+      }
+      const visible = trunkMsgs.filter(m => m.role !== 'system');
+      if (!visible.length) {
+        md += '_No messages._\n\n';
+      } else {
+        // Map visible index back to raw index for fork markers
+        let rawIdx = -1;
+        let visIdx = 0;
+        for (const m of trunkMsgs) {
+          rawIdx++;
+          if (m.role === 'system') continue;
+          const role = m.role === 'user' ? '**🧑 User**' : '**🤖 Assistant**';
+          md += `${role} · ${fmtTime(m.createdAt)}\n\n${m.content}\n\n`;
+          // Insert fork marker after this message if fork exists
+          if (forksByMsgIdx[rawIdx]) {
+            const fork = forksByMsgIdx[rawIdx];
+            const bLabels = fork.branchIds.map(bid => {
+              const bn = allNodes.find(n => n.id === bid);
+              return bn ? `\`${bn.label}\`` : bid;
+            }).join(', ');
+            md += `> ⎇ **Fork point** — branches created: ${bLabels}\n\n`;
+          }
+          if (visIdx < visible.length - 1) md += `---\n\n`;
+          visIdx++;
+        }
+      }
+    }
+    md += `---\n\n`;
+
+    // All Branches (active, committed, discarded, promoted, split — all included)
+    const branchesSorted = [...branches].sort((a, b) => a.createdAt - b.createdAt);
+    if (branchesSorted.length > 0) {
+      md += `## 🌿 Branches\n\n`;
+      for (const bn of branchesSorted) {
+        const st = bn.status || 'active';
+        const emoji = statusEmoji[st] || '●';
+        const parentNode = allNodes.find(n => n.id === bn.parentId);
+        md += `### ${emoji} ${bn.label}\n\n`;
+        md += `| Field | Value |\n|---|---|\n`;
+        md += `| **Status** | ${st.toUpperCase()} |\n`;
+        md += `| **Fork point** | Message ${(bn.forkAfterMsgIdx ?? 0) + 1} of \`${parentNode?.label || 'trunk'}\` |\n`;
+        md += `| **Created** | ${fmtTime(bn.createdAt)} |\n`;
+        if (bn.resolvedAt) md += `| **Resolved** | ${fmtTime(bn.resolvedAt)} |\n`;
+        if (bn.commitSummary) md += `| **Commit summary** | ${bn.commitSummary.replace(/\n/g,' ').slice(0,120)}… |\n`;
+        if (bn.splitToConvoId) md += `| **Split to** | Conversation \`${bn.splitToConvoId}\` |\n`;
+        md += `\n`;
+
+        // Context snapshot
+        const snaps = await dbGetAllByIndex('snapshots', 'nodeId', bn.id);
+        if (snaps.length) {
+          md += `**Context Snapshot** _(inherited from parent at fork)_\n\n`;
+          md += `> ${snaps[0].summary.replace(/\n/g, '\n> ')}\n\n`;
+        }
+
+        // Messages
+        md += `**Conversation**\n\n`;
+        md += await formatNodeMessages(bn.id, bn.label);
+        md += `---\n\n`;
+      }
+    }
+
+    // Footer
+    md += `_Exported by ORAND Conversation Brancher v1.0 · ${exportDate}_\n`;
+
+    // ── download ─────────────────────────────────────────────────────────────
+    // showSaveFilePicker is blocked on file:// origins — always use blob download
+    const isFileOrigin = location.protocol === 'file:';
+    if (!isFileOrigin && window.showSaveFilePicker) {
+      try {
+        const handle = await window.showSaveFilePicker({
+          suggestedName: fileName,
+          types: [{ description: 'Markdown file', accept: { 'text/markdown': ['.md'] } }],
+        });
+        const writable = await handle.createWritable();
+        await writable.write(md);
+        await writable.close();
+      } catch (e) {
+        if (e.name !== 'AbortError') fallbackDownload(md, fileName);
+      }
+    } else {
+      fallbackDownload(md, fileName);
+    }
+  } catch(e) {
+    console.error('Export error:', e);
+    alert(`Export failed: ${e.message}`);
+  } finally {
+    btn.textContent = '⬇ Export as Markdown'; btn.disabled = false;
+  }
+}
+
+function fallbackDownload(content, fileName) {
+  const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  // Delay revoke — Chrome on file:// interprets immediate revoke as a
+  // navigation back to the source file, triggering a frame security error
+  setTimeout(() => {
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, 2000);
+}
+
+// ── SEARCH ────────────────────────────────────────────────────────────────────
+async function performSearch(query) {
+  if (!query || query.trim().length <2) {
+    state.searchQuery = '';
+    state.searchResults = [];
+    state.activeSearchHighlight = '';
+    renderSearchResults();
+    if (state.activeNodeId) renderChat(); // Clear highlighting
+    return;
+  }
+
+  // Clear any previous highlighting when starting new search
+  if (state.activeSearchHighlight) {
+    state.activeSearchHighlight = '';
+    if (state.activeNodeId) renderChat();
+  }
+
+  state.searchQuery = query.trim();
+  const results = [];
+  const searchTerm = state.searchQuery.toLowerCase();
+
+  // Load all conversations
+  const convos = await new Promise((res,rej)=>{
+    const r = dbTx('conversations').getAll();
+    r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error);
+  });
+
+  // Search through each conversation
+  for (const convo of convos) {
+    // Search in conversation title
+    if (convo.title.toLowerCase().includes(searchTerm)) {
+      results.push({
+        type: 'conversation',
+        convoId: convo.id,
+        convoTitle: convo.title,
+        nodeId: null,
+        messagesnippet: `Conversation title matches: "${convo.title}"`,
+        createdAt: convo.createdAt
+      });
+    }
+
+    // Search in all nodes/messages for this conversation
+    const nodes = await dbGetAllByIndex('nodes', 'convoId', convo.id);
+    for (const node of nodes) {
+      // Search in node label
+      if (node.label && node.label.toLowerCase().includes(searchTerm)) {
+        results.push({
+          type: 'node',
+          convoId: convo.id,
+          convoTitle: convo.title,
+          nodeId: node.id,
+          nodeLabel: node.label,
+          snippet: `Branch/Node: "${node.label}"`,
+          createdAt: node.createdAt
+        });
+      }
+
+      // Search in messages
+      const messages = await dbGetAllByIndex('messages', 'nodeId', node.id);
+      for (const msg of messages) {
+        if (msg.role !== 'system' && msg.content.toLowerCase().includes(searchTerm)) {
+          // Extract snippet with context
+          const lowerContent = msg.content.toLowerCase();
+          const index = lowerContent.indexOf(searchTerm);
+          const start = Math.max(0, index - 60);
+          const end = Math.min(msg.content.length, index + searchTerm.length + 60);
+          let snippet = msg.content.substring(start, end);
+          if (start > 0) snippet = '...' + snippet;
+          if (end < msg.content.length) snippet = snippet + '...';
+          
+          results.push({
+            type: 'message',
+            convoId: convo.id,
+            convoTitle: convo.title,
+            nodeId: node.id,
+            nodeLabel: node.label || 'Trunk',
+            messageId: msg.id,
+            role: msg.role,
+            snippet: snippet,
+            createdAt: msg.createdAt
+          });
+        }
+      }
+    }
+  }
+
+  // Sort by relevance (conversation titles first, then by date)
+  results.sort((a, b) => {
+    if (a.type === 'conversation' && b.type !== 'conversation') return -1;
+    if (a.type !== 'conversation' && b.type === 'conversation') return 1;
+    return b.createdAt - a.createdAt;
+  });
+
+  state.searchResults = results.slice(0, 50); // Limit to 50 results
+  renderSearchResults();
+}
+
+function renderSearchResults() {
+  const container = document.getElementById('searchResults');
+  const clearBtn = document.getElementById('searchClear');
+  
+  if (!state.searchQuery || state.searchResults.length === 0) {
+    container.classList.remove('visible');
+    clearBtn.classList.remove('visible');
+    if (state.searchQuery && state.searchResults.length === 0) {
+      container.innerHTML = '<div class="search-empty">No results found for "' + esc(state.searchQuery) + '"</div>';
+      container.classList.add('visible');
+      clearBtn.classList.add('visible');
+    }
+    return;
+  }
+
+  clearBtn.classList.add('visible');
+
+  let html = '';
+  for (const result of state.searchResults) {
+    const snippet = highlightSearchTerm(result.snippet, state.searchQuery);
+    const meta = result.type === 'conversation'
+      ? 'Conversation'
+      : result.type === 'node'
+      ? `Node in ${result.convoTitle}`
+      : `${result.role === 'user' ? 'User' : 'Assistant'} in ${result.nodeLabel} • ${result.convoTitle}`;
+
+    html += `
+      <div class="search-result-item" data-convo="${result.convoId}" data-node="${result.nodeId || ''}" data-message="${result.messageId || ''}">
+        <div class="search-result-title">${esc(result.convoTitle)}</div>
+        <div class="search-result-snippet">${snippet}</div>
+        <div class="search-result-meta">${esc(meta)}</div>
+      </div>
+    `;
+  }
+
+  container.innerHTML = html;
+  container.classList.add('visible');
+
+  // Bind click events
+  container.querySelectorAll('.search-result-item').forEach(item => {
+    item.addEventListener('click', async () => {
+      const convoId = item.dataset.convo;
+      const nodeId = item.dataset.node;
+      const messageId = item.dataset.message;
+
+      // Preserve search term for highlighting in conversation
+      state.activeSearchHighlight = state.searchQuery;
+
+      // Load conversation (preserve highlighting)
+      if (convoId !== state.activeConvoId) {
+        await loadConversation(convoId, true);
+      }
+
+      // Switch to node if specified (preserve highlighting)
+      if (nodeId) {
+        await setActiveNode(nodeId, true);
+      }
+
+      // Scroll to message if specified (basic implementation)
+      if (messageId) {
+        setTimeout(() => {
+          const msgEl = document.querySelector(`[data-msg-id="${messageId}"]`);
+          if (msgEl) msgEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 200);
+      }
+
+      // Hide search UI but keep highlighting in conversation
+      hideSearchUI();
+    });
+  });
+}
+
+function highlightSearchTerm(text, term) {
+  if (!term) return esc(text);
+  const regex = new RegExp('(' + term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi');
+  return esc(text).replace(new RegExp('(' + esc(term) + ')', 'gi'), '<span class="search-highlight">$1</span>');
+}
+
+function hideSearchUI() {
+  // Collapse search UI but preserve highlighting
+  document.getElementById('searchInput').value = '';
+  state.searchQuery = '';
+  state.searchResults = [];
+  renderSearchResults();
+}
+
+function clearSearch() {
+  // Fully clear search and remove highlighting
+  document.getElementById('searchInput').value = '';
+  state.searchQuery = '';
+  state.searchResults = [];
+  state.activeSearchHighlight = '';
+  renderSearchResults();
+  // Re-render chat to remove highlighting
+  if (state.activeNodeId) renderChat();
+}
+
+// ── CONFIRM MODAL ─────────────────────────────────────────────────────────────
+function confirm(title, message, onOk) {
+  return new Promise(resolve => {
+    document.getElementById('confirmTitle').textContent = title;
+    document.getElementById('confirmMessage').textContent = message;
+    const modal = document.getElementById('confirmModal');
+    modal.classList.add('visible');
+    const ok = document.getElementById('confirmOk');
+    const cancel = document.getElementById('confirmCancel');
+    const cleanup = () => { modal.classList.remove('visible'); ok.replaceWith(ok.cloneNode(true)); cancel.replaceWith(cancel.cloneNode(true)); };
+    document.getElementById('confirmOk').addEventListener('click', async () => { cleanup(); await onOk(); resolve(true); }, { once:true });
+    document.getElementById('confirmCancel').addEventListener('click', () => { cleanup(); resolve(false); }, { once:true });
+  });
+}
+
+// ── EVENTS ────────────────────────────────────────────────────────────────────
+function bindEvents() {
+  // Tab switching
+  document.querySelectorAll('.top-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.top-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      const which = tab.dataset.tab;
+      document.getElementById('appTab').style.display = which === 'app' ? 'flex' : 'none';
+      document.getElementById('guideTab').classList.toggle('active', which === 'guide');
+    });
+  });
+
+  // Search with debounce
+  let searchTimeout;
+  document.getElementById('searchInput').addEventListener('input', (e) => {
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(() => {
+      performSearch(e.target.value);
+    }, 300);
+  });
+
+  // Clear search
+  document.getElementById('searchClear').addEventListener('click', clearSearch);
+
+  // Send
+  document.getElementById('sendBtn').addEventListener('click', sendMessage);
+  document.getElementById('userInput').addEventListener('keydown', e => {
+    if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); sendMessage(); }
+    // Auto-resize
+    setTimeout(() => {
+      e.target.style.height = 'auto';
+      e.target.style.height = Math.min(e.target.scrollHeight, 140) + 'px';
+    }, 0);
+  });
+
+  // Model change
+  document.getElementById('modelSelect').addEventListener('change', updateModelBadge);
+
+  // Refresh models
+  document.getElementById('refreshModelsBtn').addEventListener('click', refreshModels);
+
+  // Test LM Studio connection in browser
+  document.getElementById('testLMBtn').addEventListener('click', () => {
+    window.open(`${getLMUrl()}/v1/models`, '_blank');
+  });
+
+  // New conversation
+  document.getElementById('newConvoBtn').addEventListener('click', async () => {
+    await createConversation();
+  });
+
+  // Fork panel
+  document.getElementById('addForkBtn').addEventListener('click', async () => {
+    const msgs = await getMessages(state.activeNodeId);
+    const lastAssistantIdx = [...msgs].reverse().findIndex(m => m.role === 'assistant');
+    if (lastAssistantIdx === -1) return;
+    const realIdx = msgs.length - 1 - lastAssistantIdx;
+    await openForkPanel(realIdx);
+  });
+  document.getElementById('closeForkPanel').addEventListener('click', closeForkPanel);
+  document.getElementById('addAnotherBranch').addEventListener('click', addBranchRow);
+  document.getElementById('submitForkBtn').addEventListener('click', launchBranches);
+
+  // Branch actions
+  document.getElementById('btnDiscard').addEventListener('click', () => discardBranch(state.activeNodeId));
+  document.getElementById('btnCommit').addEventListener('click', () => commitBranch(state.activeNodeId));
+  document.getElementById('btnPromote').addEventListener('click', () => promoteBranch(state.activeNodeId));
+  document.getElementById('btnSplit').addEventListener('click', () => splitToNewTree(state.activeNodeId));
+
+  // Reset DB (recovery)
+  document.getElementById('resetDbBtn').addEventListener('click', async () => {
+    if (!window.confirm('This will delete the IndexedDB and reload the page. All conversation data will be lost. Continue?')) return;
+    if (db) { db.close(); db = null; }
+    const del = indexedDB.deleteDatabase(CFG.DB_NAME);
+    del.onsuccess = () => location.reload();
+    del.onerror = () => alert('Reset failed — try clearing site data in Chrome DevTools → Application → Storage.');
+  });
+
+  // Export
+  document.getElementById('exportMdBtn').addEventListener('click', exportConversationMD);
+
+  // Clear all
+  document.getElementById('clearAllBtn').addEventListener('click', async () => {
+    await confirm('Clear All Data', 'This will permanently delete all conversations, branches, and messages. Cannot be undone.', async () => {
+      await dbClearAll();
+      state.activeConvoId = null;
+      state.activeNodeId = null;
+      state.nodes = {}; state.messages = {};
+      await renderTree();
+      document.getElementById('messagesArea').innerHTML = '<div id="emptyState"><div class="empty-icon">🌿</div><p>All data cleared. Start a new conversation.</p></div>';
+      document.getElementById('chatNodeTitle').textContent = 'No conversation selected';
+      document.getElementById('chatNodeDesc').textContent = '';
+    });
+  });
+
+  // Click outside modal
+  document.getElementById('confirmModal').addEventListener('click', e => {
+    if (e.target === document.getElementById('confirmModal')) {
+      document.getElementById('confirmModal').classList.remove('visible');
+    }
+  });
+}
+
+// ── INIT ──────────────────────────────────────────────────────────────────────
+async function init() {
+  try {
+    await initDB();
+    bindEvents();
+
+    // Load most recent conversation if any
+    const convos = await new Promise((res,rej)=>{
+      const r = dbTx('conversations').getAll();
+      r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error);
+    });
+    if (convos.length) {
+      convos.sort((a,b)=>b.createdAt-a.createdAt);
+      await loadConversation(convos[0].id);
+    } else {
+      await renderTree();
+    }
+
+    // Try connecting to LM Studio
+    await refreshModels().catch(() => {});
+  } catch(e) {
+    console.error('Init error:', e);
+  }
+}
+
+init();
+</script>
+</body>
+</html>

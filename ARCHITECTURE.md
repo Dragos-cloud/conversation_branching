@@ -1,8 +1,8 @@
-# ORAND Conversation Brancher - Architecture & Logic
+# ORAND Praxis - Architecture & Logic
 
 ## Overview
 
-ORAND Conversation Brancher is a single-file HTML application that enables non-linear conversations with Large Language Models (LLMs). It implements a tree-based conversation structure with branching, forking, lifecycle management, and full-text search capabilities.
+ORAND Praxis is a single-file HTML application that enables non-linear conversations with Large Language Models (LLMs). It implements a tree-based conversation structure with branching, forking, lifecycle management, and full-text search capabilities.
 
 **Version**: 1.3  
 **Last Modified**: 2026-03-22  
@@ -873,4 +873,4 @@ async function handlerFunction() { ... }
 
 **Document Version**: 1.1 (for App v1.3)  
 **Last Updated**: 2026-03-22  
-**Maintainer**: ORAND Conversation Brancher Project
+**Maintainer**: ORAND Praxis Project

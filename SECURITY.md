@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-Currently supported version of ORAND Conversation Brancher:
+Currently supported version of ORAND Praxis:
 
 | Version | Supported          |
 | ------- | ------------------ |
@@ -13,7 +13,7 @@ Currently supported version of ORAND Conversation Brancher:
 
 ### Data Privacy
 
-ORAND Conversation Brancher is designed with privacy in mind:
+ORAND Praxis is designed with privacy in mind:
 
 - **Local Storage Only**: All conversation data is stored locally in your browser's IndexedDB
 - **No External Servers**: No data is sent to external servers (except your configured LM Studio instance)
@@ -47,7 +47,7 @@ The application relies on browser security features:
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in ORAND Conversation Brancher, please follow these steps:
+If you discover a security vulnerability in ORAND Praxis, please follow these steps:
 
 ### How to Report
 

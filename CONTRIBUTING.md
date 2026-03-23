@@ -1,6 +1,6 @@
-# Contributing to ORAND Conversation Brancher
+# Contributing to ORAND Praxis
 
-Thank you for your interest in contributing to ORAND Conversation Brancher! This document provides guidelines for contributing to the project.
+Thank you for your interest in contributing to ORAND Praxis! This document provides guidelines for contributing to the project.
 
 ## Code of Conduct
 
@@ -97,7 +97,7 @@ When making changes, update the version in the META section:
 
 ```html
 <!-- SECTION:META
-  App: ORAND Conversation Brancher
+  App: ORAND Praxis
   Version: X.Y
   ...
   Last-modified: YYYY-MM-DD
@@ -162,4 +162,4 @@ By contributing, you agree that your contributions will be licensed under the MI
 
 ---
 
-Thank you for contributing to ORAND Conversation Brancher! 🎉
+Thank you for contributing to ORAND Praxis! 🎉

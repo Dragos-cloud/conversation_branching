@@ -1,7 +1,5 @@
 # ORAND Praxis
 
-A non-linear LLM conversation tool with branching, fork management, soft-delete audit trail, and Markdown export capabilities.
-
 ## Overview
 
 ORAND Praxis is a single-file HTML application that enables branching conversations with Large Language Models (LLMs). Unlike traditional linear chat interfaces, this tool allows you to explore multiple conversation paths, fork responses, and manage different branches of dialogue.

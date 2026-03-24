@@ -3,7 +3,7 @@
 <head>
 <!-- SECTION:META
   App: ORAND Praxis
-  Version: 1.7
+  Version: 1.7.1
   Description: Non-linear LLM conversation tool with selective commit injection, exact context preservation, branching, promote/split to new conversations, complete audit trail, MD export, and full-text search
   Last-modified: 2026-03-24
   Sections: META, CONFIG, STYLE, STATE, UI, LOGIC:db, LOGIC:actionlog, LOGIC:lmstudio, LOGIC:tree, LOGIC:branch, LOGIC:search, LOGIC:export, EVENTS, INIT, USERGUIDE
@@ -2125,7 +2125,8 @@ async function renderChat() {
   const title = document.getElementById('chatNodeTitle');
   const desc = document.getElementById('chatNodeDesc');
 
-  const isDiscarded = node.status === 'discarded';
+  // Read-only for all resolved branches (discarded, promoted, split, committed)
+  const isReadOnly = ['discarded', 'promoted', 'split', 'committed'].includes(node.status);
 
   if (node.isTrunk) {
     badge.style.cssText = 'background:var(--blue-light);color:var(--blue);';
@@ -2138,11 +2139,25 @@ async function renderChat() {
       document.getElementById(id).classList.remove('visible');
     });
   } else {
-    if (isDiscarded) {
+    if (isReadOnly) {
       badge.style.cssText = 'background:#f5f5f5;color:#999;';
       badge.textContent = '🔒 READ-ONLY';
       title.textContent = node.label;
-      desc.textContent = 'Resolved: Discarded • Read-only mode';
+      
+      // Show resolution type
+      let resolutionText = 'Resolved: Read-only mode';
+      if (node.status === 'discarded') {
+        resolutionText = 'Resolved: Discarded • Read-only mode';
+      } else if (node.status === 'committed') {
+        resolutionText = 'Resolved: Committed to Main • Read-only mode';
+      } else if (node.status === 'promoted') {
+        const targetId = node.promotedToConvoId ? ` → Conv #${node.promotedToConvoId.slice(-4)}` : '';
+        resolutionText = `Resolved: Promoted to New Conversation${targetId} • Read-only mode`;
+      } else if (node.status === 'split') {
+        const targetId = node.splitToConvoId ? ` → Conv #${node.splitToConvoId.slice(-4)}` : '';
+        resolutionText = `Resolved: Split to New Conversation${targetId} • Read-only mode`;
+      }
+      desc.textContent = resolutionText;
     } else {
       badge.style.cssText = `background:${node.color}22;color:${node.color};`;
       badge.textContent = node.label.toUpperCase();
@@ -2153,32 +2168,17 @@ async function renderChat() {
       const snaps = await dbGetAllByIndex('snapshots', 'nodeId', nodeId);
       const snapshotCount = snaps.length && snaps[0].messages ? snaps[0].messages.length : 0;
       
-      if (node.resolved) {
-        // Show resolution type
-        let resolutionText = 'Resolved';
-        if (node.status === 'committed') {
-          resolutionText = 'Resolved: Commit to Main';
-        } else if (node.status === 'promoted') {
-          const targetId = node.promotedToConvoId ? ` → Conv #${node.promotedToConvoId.slice(-4)}` : '';
-          resolutionText = `Resolved: Promoted to New Conversation${targetId}`;
-        } else if (node.status === 'split') {
-          const targetId = node.splitToConvoId ? ` → Conv #${node.splitToConvoId.slice(-4)}` : '';
-          resolutionText = `Resolved: Split to New Conversation${targetId}`;
-        }
-        desc.textContent = resolutionText;
-      } else {
-        desc.textContent = `${branchMsgs} message${branchMsgs !== 1 ? 's' : ''} · ${snapshotCount} from trunk`;
-      }
+      desc.textContent = `${branchMsgs} message${branchMsgs !== 1 ? 's' : ''} · ${snapshotCount} from trunk`;
     }
     ['btnDiscard','btnCommit','btnPromote','btnSplit'].forEach(id => {
-      document.getElementById(id).classList.toggle('visible', !node.resolved && !isDiscarded);
+      document.getElementById(id).classList.toggle('visible', !isReadOnly);
     });
   }
 
-  // Disable input controls for discarded branches
-  document.getElementById('userInput').disabled = isDiscarded;
-  document.getElementById('sendBtn').disabled = isDiscarded;
-  document.getElementById('addForkBtn').disabled = !node.isTrunk || isDiscarded;
+  // Disable input controls for read-only branches (discarded, promoted, split, committed)
+  document.getElementById('userInput').disabled = isReadOnly;
+  document.getElementById('sendBtn').disabled = isReadOnly;
+  document.getElementById('addForkBtn').disabled = !node.isTrunk || isReadOnly;
 
   // Messages
   const msgs = await getMessages(nodeId);
@@ -2246,7 +2246,7 @@ async function renderChat() {
 
   // Update addForkBtn (already set in header section above)
   const hasMsgs = msgs.filter(m=>m.role==='assistant').length > 0;
-  if (!isDiscarded) {
+  if (!isReadOnly) {
     document.getElementById('addForkBtn').disabled = !hasMsgs || !node.isTrunk;
   }
   
@@ -2562,7 +2562,7 @@ async function exportConversationMD() {
     }
 
     // Footer
-    md += `_Exported by ORAND Praxis v1.7 · ${exportDate}_\n`;
+    md += `_Exported by ORAND Praxis v1.7.1 · ${exportDate}_\n`;
 
     // ── download ─────────────────────────────────────────────────────────────
     // showSaveFilePicker is blocked on file:// origins — always use blob download

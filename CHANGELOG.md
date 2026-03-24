@@ -5,6 +5,15 @@ All notable changes to ORAND Praxis will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.1] - 2026-03-24
+
+### Fixed
+- **Read-Only UI Consistency**: Split, Promoted, and Committed branches now have consistent read-only UI like Discarded branches
+  - All resolved branches (discarded, committed, promoted, split) now show "🔒 READ-ONLY" badge with gray styling
+  - All action buttons (Commit, Discard, Promote, Split) are hidden for resolved branches
+  - Input field, send button, and fork button are disabled when viewing resolved branches
+  - Maintains complete audit trail visibility while preventing accidental modifications
+
 ## [1.7.0] - 2026-03-24
 
 ### 🔥 Breaking Changes

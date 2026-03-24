@@ -10,12 +10,15 @@ ORAND Praxis is a single-file HTML application that enables branching conversati
 
 - **🌳 Branching Conversations**: Create multiple conversation branches from any point
 - **🔀 Fork Management**: Split conversations into multiple parallel branches to explore different responses
-- **� Full-Text Search**: Search across all conversations, branches, and messages with instant results
-- **�📝 Audit Trail**: Soft-delete system maintains conversation history
+- **🎯 Exact Context Preservation**: Branches inherit complete message history with zero information loss (v1.5)
+- **✨ Selective Message Commit**: Cherry-pick which messages to merge from branches to trunk with interactive UI (v1.6)
+- **📊 Context Size Indicator**: Real-time message count with color-coded efficiency metrics (v1.5)
+- **🔍 Full-Text Search**: Search across all conversations, branches, and messages with instant results
+- **📝 Audit Trail**: Soft-delete system maintains conversation history with read-only visibility for all resolved branches: discarded, promoted, and split (v1.4, v1.6.2, v1.6.3, v1.7)
 - **💾 Local Storage**: All data stored locally in IndexedDB - no server required
 - **📤 Markdown Export**: Export entire conversation trees to Markdown format
 - **🔄 LM Studio Integration**: Connect to local LM Studio instance for LLM inference
-- **📊 Visual Tree View**: Intuitive visual representation of conversation branches
+- **📈 Visual Tree View**: Intuitive visual representation of all conversation branches including discarded ones
 - **🎨 Color-Coded Branches**: Easy-to-distinguish branch colors for better organization
 - **⚡ Single File**: Entire application in one HTML file - no dependencies or build process
 
@@ -28,7 +31,7 @@ ORAND Praxis is a single-file HTML application that enables branching conversati
 
 ### Installation
 
-1. Download `orand_conversation_brancher_v1.3.html` (or latest version)
+1. Download `orand_praxis_v1.3.html` (or latest version)
 2. Open the file in your web browser
 3. That's it! The app is ready to use.
 
@@ -68,8 +71,42 @@ ORAND Praxis is a single-file HTML application that enables branching conversati
 
 - **Commit**: Merge a branch into the trunk (main conversation)
 - **Discard**: Soft-delete a branch (can be viewed in audit log)
-- **Promote**: Make a branch the new trunk
-- **Split**: Create a new independent conversation tree from a branch
+- **Promote**: Create a new conversation with full original context plus this branch's direction (v1.7)
+- **Split**: Create a new independent conversation tree from the fork point only
+
+### Selective Commit (v1.6)
+
+When committing a branch, you can now choose exactly which messages to merge into the main conversation:
+
+1. Click "Commit" on any branch
+2. Review all branch messages in an interactive modal
+3. **Select/deselect messages** using checkboxes (all selected by default)
+4. Use "Select All" to quickly toggle all messages
+5. Click "Commit Selected" to inject chosen messages into trunk
+
+**Benefits:**
+- **Cherry-pick insights**: Keep only the valuable parts of an exploration
+- **Filter hallucinations**: Exclude incorrect or off-track responses
+- **Narrative control**: Maintain a coherent main conversation thread
+- **Full transparency**: See exactly what you're merging before committing
+
+The modal shows each message with its role (user/assistant), content preview, and selection state. All selections are recorded in the action log for complete audit trail.
+
+### Context Management (v1.5)
+
+**Exact Context Preservation**: When you create branches, ORAND Praxis now preserves the complete conversation history with zero information loss. Unlike previous versions that used LLM-generated summaries, v1.5 stores exact copies of all messages, ensuring:
+- Perfect semantic fidelity - no summarization artifacts
+- Faster branch creation - eliminates extra LLM calls
+- Better conversation continuity across branches
+- More predictable LLM behavior
+
+**Context Size Indicator**: The input area displays a real-time context counter showing how many messages are in the current conversation context. The indicator uses color coding for efficiency guidance:
+- 🟢 **Green** (< 20 messages): Optimal context size
+- 🟡 **Yellow** (20-39 messages): Good context size  
+- 🟠 **Orange** (40-59 messages): Large context - consider forking
+- 🔴 **Red** (≥ 60 messages): Very large context - forking recommended
+
+For branches, hover over the counter to see a comparison with the parent branch's context size.
 
 ### Exporting
 

@@ -6,8 +6,10 @@ Currently supported version of ORAND Praxis:
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 1.2     | :white_check_mark: |
-| < 1.2   | :x:                |
+| 1.5     | :white_check_mark: |
+| 1.4     | :white_check_mark: |
+| 1.3     | :white_check_mark: |
+| < 1.3   | :x:                |
 
 ## Security Considerations
 

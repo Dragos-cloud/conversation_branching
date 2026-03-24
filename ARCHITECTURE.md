@@ -4,8 +4,8 @@
 
 ORAND Praxis is a single-file HTML application that enables non-linear conversations with Large Language Models (LLMs). It implements a tree-based conversation structure with branching, forking, lifecycle management, and full-text search capabilities.
 
-**Version**: 1.3  
-**Last Modified**: 2026-03-22  
+**Version**: 1.6.3  
+**Last Modified**: 2026-03-24  
 **Architecture**: Client-side only (no backend server)
 
 ---
@@ -117,12 +117,17 @@ The application uses 5 object stores:
 {
   id: string,              // Unique identifier
   nodeId: string,          // Branch node ID
-  summary: string,         // LLM-generated summary of parent context
-  rawCount: number,        // Number of messages summarized
+  messages: Array<{        // Exact copies of parent context messages (v1.5)
+    role: string,          // 'user'|'assistant'
+    content: string,       // Message content
+    createdAt: number      // Message timestamp
+  }>,
+  rawCount: number,        // Number of messages in snapshot
   model: string,           // LLM model used
   createdAt: number        // Timestamp
 }
 // Index: nodeId
+// Note: v1.5 changed from summary string to messages array for exact context preservation
 ```
 
 #### 5. **actionLog**
@@ -153,7 +158,7 @@ CFG = {
   MAX_BRANCHES_PER_FORK: 4,
   BRANCH_CAN_BRANCH: false,          // Future: nested branching
   BRANCH_COLORS: ['#e74c3c','#27ae60','#8e44ad','#e67e22'],
-  SUMMARY_MAX_TOKENS: 400,
+  SUMMARY_MAX_TOKENS: 400,           // Deprecated in v1.5 (exact context used instead)
   LM_DEFAULT_URL: 'http://localhost:1234'
 }
 ```
@@ -218,10 +223,9 @@ Conversation (conversations)
 3. User defines N branch prompts (max 4)
 4. System creates:
    a. N new branch nodes
-   b. Summary of conversation up to fork point
-   c. Snapshot for each branch
-   d. System message with context summary
-   e. User message with branch prompt
+   b. Exact copies of conversation messages up to fork point (v1.5)
+   c. Snapshot for each branch containing full message array
+   d. User message with branch prompt
 5. System calls LM Studio API in parallel for all branches
 6. Responses added as assistant messages
 7. Fork entry added to parent node
@@ -234,17 +238,17 @@ Conversation (conversations)
 //   Render trunk node
 //   If active conversation:
 //     For each fork in trunk.forks:
-//       Count active branches:
-//         - Include: no status, 'active', 'committed'
-//         - Exclude: 'discarded', 'promoted', 'split'
-//       If activeBranches > 0:
-//         Render fork connector
-//         For each branchId:
-//           If not discarded/promoted/split:
-//             Render branch node (with ✓ if committed)
+//       For each branchId:
+//         Render branch node (includes all resolved branches: v1.4 discarded, v1.6.2 promoted, v1.6.3 split)
+//         Branch styling based on status:
+//           - 'active': normal styling
+//           - 'committed': checkmark indicator
+//           - 'discarded': dimmed with strikethrough (v1.4)
+//           - 'promoted': visible with ↑ indicator and blue gradient (v1.6.2)
+//           - 'split': visible with ⎇ indicator and purple/green gradient (v1.6.3)
 ```
 
-**Why committed branches are hidden**: If a fork has ALL branches resolved (discarded/promoted/split), the entire fork is hidden. If at least one active or committed branch exists, committed branches show with a checkmark.
+**Tree Visibility Rules (v1.6.3)**: All branch statuses are visible for complete audit trail. Fork entries are never hidden. Active, committed, discarded, promoted, and split branches all remain visible with distinct styling. Promoted branches show with ⬆ badge and blue styling. Split branches show with ⎇ badge and purple styling plus target conversation ID.
 
 ---
 
@@ -280,62 +284,78 @@ Conversation (conversations)
 
 **Data**: All messages preserved, visible in export and audit log
 
-### 2. **Commit Branch**
+### 2. **Commit Branch (v1.6 - Selective Injection)**
 
-**Purpose**: Add branch insights to trunk as context
+**Purpose**: Selectively inject chosen branch messages into trunk
 
 **Process**:
 ```javascript
-1. Generate summary of branch messages
-2. Add summary as assistant message to trunk:
-   "📌 Committed branch '[name]':\n[summary]"
-3. Set node.status = 'committed'
-4. Set node.commitSummary = summary
-5. Set node.resolvedAt = timestamp
-6. Log action
-7. Switch to trunk
-8. Re-render tree (branch still visible with ✓)
+1. Show interactive modal with all branch messages (checkboxes, role badges, previews)
+2. User selects which messages to inject (all selected by default)
+3. User clicks "Commit Selected" (or cancels)
+4. Add header message to trunk:
+   "📌 Committed N messages from branch '[name]':"
+5. Inject selected messages directly to trunk (preserving role and content)
+6. Set node.status = 'committed'
+7. Set node.commitSummary = "N of M messages injected"
+8. Set node.resolvedAt = timestamp
+9. Log action with message indices for audit trail
+10. Switch to trunk
+11. Re-render tree (branch still visible with ✓)
 ```
 
-**Result**: Branch context available to trunk, branch remains visible
+**v1.6 Changes**:
+- Replaced LLM summary generation with user-controlled message selection
+- Interactive modal UI with checkbox selection, "Select All" toggle, selection counter
+- Direct message injection instead of summarized context
+- Detailed action log with selected message indices
+- Faster commit operation (no LLM call)
+
+**Result**: Selected branch messages directly available in trunk, branch remains visible with commit indicator
 
 ### 3. **Promote Branch**
 
-**Purpose**: Replace trunk with branch content
+**Purpose**: Create new conversation with full original context plus branch direction (v1.7)
 
 **Process**:
 ```javascript
-1. Find sibling branches at same fork
-2. Soft-delete all sibling branches (status='discarded')
-3. Get trunk messages
-4. Delete trunk messages after fork point
-5. Copy all branch messages to trunk
-6. Set branch.status = 'promoted'
-7. Set branch.resolvedAt = timestamp
-8. Log actions for branch and siblings
-9. Switch to trunk
-10. Re-render tree
+1. Get all trunk messages and branch messages
+2. Create new conversation with title "Promote: [branch-label]"
+3. Copy ALL trunk messages up to fork point to new conversation
+4. Copy all branch messages to new conversation (after trunk messages)
+5. Set node.status = 'promoted'
+6. Set node.promotedToConvoId = new conversation ID
+7. Set node.resolvedAt = timestamp
+8. Soft-delete all sibling branches (status='discarded')
+9. Log actions for branch and siblings
+10. Switch to new conversation
+11. Re-render tree
 ```
 
-**Result**: Branch becomes the main conversation, siblings hidden
+**Context Model**: Full trunk history + branch direction (complete original context)
+
+**Result**: New conversation created with full context, original conversation intact, promoted branch visible in original tree with ↑ indicator and target conversation ID
 
 ### 4. **Split to New Tree**
 
-**Purpose**: Make branch an independent conversation
+**Purpose**: Create new independent conversation from fork point only
 
 **Process**:
 ```javascript
 1. Create new conversation with title "Split: [branch-label]"
-2. Copy all branch messages to new conversation's trunk
-3. Set node.status = 'split'
-4. Set node.splitToConvoId = new conversation ID
-5. Set node.resolvedAt = timestamp
-6. Log action
-7. Switch to new conversation
-8. Re-render tree (branch hidden from original)
+2. Copy fork-point context messages to new conversation (from node.contextMessages)
+3. Copy all branch messages to new conversation's trunk
+4. Set node.status = 'split'
+5. Set node.splitToConvoId = new conversation ID
+6. Set node.resolvedAt = timestamp
+7. Log action
+8. Switch to new conversation
+9. Re-render tree
 ```
 
-**Result**: Branch becomes independent conversation, preserved in audit
+**Context Model**: Fork-point snapshot only (fresh start from fork)
+
+**Result**: New independent conversation created, original conversation intact, split branch visible in original tree with ⎇ indicator and target conversation ID (v1.6.3)
 
 ---
 
@@ -624,10 +644,19 @@ When `DB_VERSION` increases:
 - Full conversation history (all messages)
 - Optional system prompt from config
 
-**For Branch Messages**:
-- System message with summary of parent up to fork
-- Branch-specific messages only
-- Prevents context pollution between branches
+**For Branch Messages (v1.5 - Exact Context Preservation)**:
+- Complete parent conversation context (exact message copies from snapshot)
+- Branch-specific messages
+- No summarization - perfect semantic fidelity
+- Context reconstruction: `[...snapshotMessages, ...branchMessages]`
+- Prevents context pollution between branches while maintaining full transparency
+
+**v1.5 Changes**:
+- Eliminated LLM-generated summaries during fork creation
+- Snapshots now store complete message arrays instead of summary strings
+- Faster branch creation (no extra LLM call required)
+- Better conversation continuity and predictable LLM behavior
+- Context size indicator displays real-time message count with efficiency color coding
 
 ### Error Handling
 
@@ -672,8 +701,8 @@ When `DB_VERSION` increases:
 | **Created** | [Date] |
 | **Fork point** | After message X |
 
-**Context Snapshot**  
-[Summary]
+**Context Snapshot (v1.5)**  
+Exact copy of [N] parent messages
 
 [Branch messages...]
 

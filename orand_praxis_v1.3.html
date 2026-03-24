@@ -3,9 +3,9 @@
 <head>
 <!-- SECTION:META
   App: ORAND Praxis
-  Version: 1.3
-  Description: Non-linear LLM conversation tool with branching, fork management, soft-delete audit trail, MD export, and full-text search
-  Last-modified: 2026-03-22
+  Version: 1.7
+  Description: Non-linear LLM conversation tool with selective commit injection, exact context preservation, branching, promote/split to new conversations, complete audit trail, MD export, and full-text search
+  Last-modified: 2026-03-24
   Sections: META, CONFIG, STYLE, STATE, UI, LOGIC:db, LOGIC:actionlog, LOGIC:lmstudio, LOGIC:tree, LOGIC:branch, LOGIC:search, LOGIC:export, EVENTS, INIT, USERGUIDE
 -->
 <meta charset="UTF-8">
@@ -176,6 +176,48 @@
     margin-top: 3px;
   }
   .node-badge.trunk { background: var(--blue-light); color: var(--blue); }
+  .node-badge.discarded { background: #f5f5f5; color: #999; }
+
+  /* Discarded branch styling */
+  .tree-node.discarded {
+    opacity: 0.5;
+  }
+  .tree-node.discarded .node-label {
+    text-decoration: line-through;
+    color: var(--text-muted);
+    font-style: italic;
+  }
+  .tree-node.discarded .node-dot {
+    opacity: 0.4;
+  }
+
+  /* Promoted branch styling */
+  .tree-node.promoted {
+    opacity: 0.85;
+    background: linear-gradient(to right, var(--blue-light), transparent);
+  }
+  .tree-node.promoted .node-label {
+    font-weight: 600;
+    color: var(--blue);
+  }
+  .node-badge.promoted {
+    font-size: 10px;
+    padding: 2px 6px;
+  }
+
+  /* Split branch styling */
+  .tree-node.split {
+    opacity: 0.75;
+    background: linear-gradient(to right, #e8f5e9, transparent);
+  }
+  .tree-node.split .node-label {
+    font-weight: 600;
+    color: #7b1fa2;
+  }
+  .node-badge.split {
+    font-size: 10px;
+    padding: 2px 6px;
+  }
 
   .fork-connector {
     padding: 2px 14px 2px 28px;
@@ -497,6 +539,36 @@
     font-weight: 600;
     font-size: 11px;
   }
+  #contextCounter {
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 600;
+    font-size: 11px;
+    cursor: help;
+    transition: all 0.15s;
+  }
+  #contextCounter.ctx-green { background: #e8f5e9; color: #2e7d32; }
+  #contextCounter.ctx-yellow { background: #fff3e0; color: #e65100; }
+  #contextCounter.ctx-orange { background: #ffe0b2; color: #d84315; }
+  #contextCounter.ctx-red { background: #ffebee; color: #c62828; }
+  #contextCounter:hover { transform: translateY(-1px); box-shadow: var(--shadow); }
+  
+  .context-tooltip {
+    position: absolute;
+    background: var(--text);
+    color: #fff;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 11px;
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 1000;
+    box-shadow: var(--shadow-lg);
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+  .context-tooltip.visible { opacity: 1; }
+  
   #addForkBtn {
     margin-left: auto;
     padding: 4px 12px;
@@ -626,6 +698,92 @@
   .modal-box h3 { margin-bottom: 10px; color: var(--text); }
   .modal-box p { color: var(--text-muted); font-size: 14px; margin-bottom: 16px; }
   .modal-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+
+  /* === COMMIT MODAL === */
+  .commit-modal-box {
+    max-width: 680px;
+    width: 95%;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+  }
+  .commit-message-list {
+    flex: 1;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px;
+    margin-bottom: 12px;
+    max-height: 400px;
+    background: var(--bg);
+  }
+  .commit-message-item {
+    display: flex;
+    gap: 10px;
+    padding: 10px;
+    border-radius: 6px;
+    margin-bottom: 6px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    transition: all 0.2s ease;
+    cursor: pointer;
+  }
+  .commit-message-item:hover {
+    background: var(--panel-hover);
+    border-color: var(--blue);
+  }
+  .commit-message-item.selected {
+    background: var(--blue-light);
+    border-color: var(--blue);
+  }
+  .commit-message-checkbox {
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    margin-top: 2px;
+    cursor: pointer;
+    accent-color: var(--blue);
+  }
+  .commit-message-content {
+    flex: 1;
+    min-width: 0;
+  }
+  .commit-message-role {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .commit-message-role.user {
+    background: var(--blue-light);
+    color: var(--blue-dark);
+  }
+  .commit-message-role.assistant {
+    background: var(--green-light);
+    color: var(--green-dark);
+  }
+  .commit-message-text {
+    color: var(--text);
+    font-size: 13px;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 120px;
+    overflow-y: auto;
+  }
+  .commit-summary {
+    padding: 8px 12px;
+    background: var(--panel-hover);
+    border-radius: 6px;
+    margin-bottom: 12px;
+    text-align: center;
+    font-size: 13px;
+    color: var(--text-muted);
+    font-weight: 500;
+  }
 
   /* === NEW CONVO BUTTON === */
   #newConvoBtn {
@@ -842,9 +1000,11 @@
             </div>
             <div id="inputMeta">
               <span id="modelBadge">No model</span>
+              <span id="contextCounter" class="ctx-green" title="Active context size">Context: 0</span>
               <span style="color:var(--text-muted);">Ctrl+Enter to send</span>
               <button id="addForkBtn">⎇ Fork from last reply</button>
             </div>
+            <div id="contextTooltip" class="context-tooltip"></div>
           </div>
         </div>
 
@@ -894,9 +1054,9 @@
         <p>A point in the trunk where you created branches. Marked visually in the message stream with a divider. A fork point stays open until all its branches are resolved.</p>
 
         <h3>Branch</h3>
-        <p>A diverging conversation thread created at a fork point. Inherits a <strong>summarized snapshot</strong> of the trunk context up to the fork — keeping token count manageable for local models. Branches are color-coded (red, green, purple, orange).</p>
+        <p>A diverging conversation thread created at a fork point. Inherits an <strong>exact copy</strong> of all trunk messages up to the fork point — preserving perfect context fidelity and ensuring the LLM has complete awareness of the conversation history. Branches are color-coded (red, green, purple, orange) and show a context size indicator.</p>
 
-        <div class="info-box" style="margin-top:10px;">📌 Maximum <strong>4 branches per fork point</strong>. Multiple fork points can be open simultaneously on the trunk.</div>
+        <div class="info-box" style="margin-top:10px;">📌 Maximum <strong>4 branches per fork point</strong>. Multiple fork points can be open simultaneously on the trunk. Context counter shows active message count with efficiency comparison.</div>
       </div>
 
       <div class="guide-section">
@@ -924,11 +1084,11 @@
           </div>
           <div class="lifecycle-card lc-promote">
             <h4>⬆ Promote to Main</h4>
-            <p>This branch becomes the new trunk from the fork point. All other branches at this fork are discarded.</p>
+            <p>Create a new conversation with full original context plus this branch's direction. Original conversation remains intact. This branch remains visible with ↑ indicator showing target conversation.</p>
           </div>
           <div class="lifecycle-card lc-split">
             <h4>⎇ Split to New Tree</h4>
-            <p>Export this branch as a completely independent new conversation. It is removed from this tree.</p>
+            <p>Create a new conversation starting from the fork point with only this branch's messages. Original conversation remains intact. This branch remains visible with ⎇ indicator showing target conversation.</p>
           </div>
         </div>
       </div>
@@ -957,8 +1117,8 @@
           <li><strong>All Branches</strong> — every branch regardless of status (active, committed, discarded, promoted, split), each with its context snapshot, status metadata, and full Q&amp;A.</li>
         </ul>
 
-        <h3>Discarded Branches</h3>
-        <p>Branches marked as Discarded are <strong>soft-deleted</strong> — hidden from the tree UI but fully preserved in IndexedDB. Their complete conversation appears in the export under <em>🗑 Discarded</em> status, enabling a full audit of every exploration path taken.</p>
+        <h3>Discarded and Promoted Branches</h3>
+        <p>Branches marked as Discarded or Promoted are <strong>soft-deleted</strong> — hidden from active workflow but fully preserved in IndexedDB and visible in the tree for audit purposes. Their complete conversation appears in the export, enabling a full audit of every exploration path and decision taken.</p>
 
         <h3>File Naming</h3>
         <p>Files are named automatically: <code>conversation_title_YYYY-MM-DD.md</code>. If your browser supports the File System Access API (Chrome/Edge), a save dialog appears. Other browsers download directly.</p>
@@ -966,10 +1126,10 @@
         <h3>Status Legend</h3>
         <ul>
           <li>🟢 <strong>Active</strong> — branch is open and in use</li>
-          <li>✅ <strong>Committed</strong> — summary merged into trunk</li>
-          <li>🗑 <strong>Discarded</strong> — hidden from UI, content preserved</li>
-          <li>⬆️ <strong>Promoted</strong> — content moved to trunk, branch retired</li>
-          <li>⎇ <strong>Split</strong> — spun off as an independent conversation</li>
+          <li>✅ <strong>Committed</strong> — selected messages merged into trunk</li>
+          <li>🗑 <strong>Discarded</strong> — visible in tree with strikethrough, content preserved</li>
+          <li>⬆️ <strong>Promoted</strong> — became new conversation with full context, visible in tree with ↑ indicator and target ID</li>
+          <li>⎇ <strong>Split</strong> — became new conversation from fork point, visible in tree with ⎇ indicator and target ID</li>
         </ul>
       </div>
 
@@ -1013,6 +1173,9 @@
       <div class="guide-section">
         <h2>📋 Version History</h2>
         <ul>
+          <li><strong>v1.6</strong> — 2026-03-24 — <strong>Major: Selective Message Commit</strong> — Replaced automatic branch summarization with selective message injection. When committing a branch, users now see an interactive modal displaying all branch messages with checkboxes. Select which messages to inject into the trunk - perfect for cherry-picking insights, avoiding hallucinations, or maintaining narrative control. All messages selected by default, with "Select All" toggle and visual selection indicators. Action log records exactly which messages were injected for full audit transparency.</li>
+          <li><strong>v1.5</strong> — 2026-03-24 — <strong>Major: Exact Context Preservation</strong> — Replaced LLM-generated summaries with exact message copies for branch context. Branches now inherit the complete, unmodified conversation history up to the fork point, ensuring perfect context fidelity and deterministic behavior. Added real-time context size indicator with color-coded badges (green/yellow/orange/red) and comparison tooltips showing context efficiency ("Branch: 8 msgs | Trunk: 30 msgs | Saved: 22 msgs"). Simpler implementation, no LLM calls needed for forking, better semantic awareness per research findings.</li>
+          <li><strong>v1.4</strong> — 2026-03-24 — Added visibility for discarded branches with read-only mode. Discarded branches now appear in the tree with reduced opacity, strikethrough text, and a "🗑 DISCARDED" badge. Clicking a discarded branch shows its full conversation history in read-only mode (input/send/fork disabled). Enables complete audit trail visibility while maintaining clear status distinction.</li>
           <li><strong>v1.3</strong> — 2026-03-22 — Added full-text search functionality: search across conversation titles, branch labels, and all message content. Search results with clickable navigation and contextual snippets. Improved sidebar usability.</li>
           <li><strong>v1.2</strong> — 2026-03-22 — Fixed IndexedDB upgrade logic (duplicate index bug), added auto-recovery on DB failure, added ⚙ Reset DB button, added LM Studio connection diagnostics and 🔗 Test button, fixed CORS fetch headers for file:// origins.</li>
           <li><strong>v1.0</strong> — 2026-03-22 — Initial release. Trunk + branch tree, fork panel, 4 lifecycle actions, IndexedDB persistence, LM Studio integration, context snapshots.</li>
@@ -1041,6 +1204,24 @@
     <div class="modal-actions">
       <button class="btn btn-ghost" id="confirmCancel">Cancel</button>
       <button class="btn btn-primary" id="confirmOk">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="commitModal">
+  <div class="modal-box commit-modal-box">
+    <h3 id="commitModalTitle">Select Messages to Commit</h3>
+    <p id="commitModalMessage">Choose which messages to inject into the main conversation:</p>
+    <div class="commit-message-list" id="commitMessageList">
+      <!-- Messages populated dynamically -->
+    </div>
+    <div class="commit-summary">
+      <span id="commitSelectedCount">0 messages selected</span>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="commitCancel">Cancel</button>
+      <button class="btn btn-secondary" id="commitSelectAll">Select All</button>
+      <button class="btn btn-primary" id="commitOk">Commit Selected</button>
     </div>
   </div>
 </div>
@@ -1480,11 +1661,10 @@ async function launchBranches() {
   const msgs = await getMessages(nodeId);
   const msgsUpToFork = msgs.slice(0, forkMsgIdx + 1);
 
-  // Generate summary once for all branches
-  let summary = '';
-  if (msgsUpToFork.length > 0) {
-    summary = await generateSummary(msgsUpToFork);
-  }
+  // Deep copy messages for exact context (no summary needed)
+  const contextMessages = msgsUpToFork
+    .filter(m => m.role !== 'system')
+    .map(m => ({ role: m.role, content: m.content, createdAt: m.createdAt }));
 
   // Register fork on trunk node
   const forkEntry = { forkMsgIdx, branchIds: [] };
@@ -1511,13 +1691,20 @@ async function launchBranches() {
     state.nodes[branchId] = branch;
     state.messages[branchId] = [];
 
-    // Save snapshot
-    const snap = { id: uid(), nodeId: branchId, summary, rawCount: msgsUpToFork.length, model: getModel(), createdAt: Date.now() };
+    // Save snapshot with exact message copies
+    const snap = { 
+      id: uid(), 
+      nodeId: branchId, 
+      messages: contextMessages,  // Store full message objects instead of summary
+      rawCount: contextMessages.length, 
+      model: getModel(), 
+      createdAt: Date.now() 
+    };
     await dbPut('snapshots', snap);
 
     // Add context note as first message
-    if (summary) {
-      await addMessage(branchId, 'system', `📌 Context snapshot (${msgsUpToFork.length} messages):\n${summary}`);
+    if (contextMessages.length > 0) {
+      await addMessage(branchId, 'system', `📌 Context: ${contextMessages.length} message${contextMessages.length !== 1 ? 's' : ''} from trunk at fork point`);
     }
 
     // Add user prompt and get LLM reply
@@ -1539,12 +1726,22 @@ async function launchBranches() {
   // Send LM requests for all branches (parallel)
   const lmCalls = branchIds.map(async (bid) => {
     const branchMsgs = await getMessages(bid);
-    const apiMsgs = branchMsgs
+    const snaps = await dbGetAllByIndex('snapshots', 'nodeId', bid);
+    
+    // Construct full context: snapshot messages + branch messages
+    let apiMsgs = [];
+    if (snaps.length && snaps[0].messages) {
+      apiMsgs = [...snaps[0].messages];  // Exact context from fork point
+    }
+    
+    // Add branch messages (excluding system notes)
+    const branchContent = branchMsgs
       .filter(m => m.role !== 'system')
       .map(m => ({ role: m.role, content: m.content }));
-    const systemNote = summary ? `Context from parent conversation:\n${summary}` : undefined;
+    apiMsgs = [...apiMsgs, ...branchContent];
+    
     try {
-      const reply = await callLM(apiMsgs, systemNote);
+      const reply = await callLM(apiMsgs);  // No systemNote needed - context is in messages
       await addMessage(bid, 'assistant', reply);
     } catch(e) {
       await addMessage(bid, 'assistant', `[Error: ${e.message}]`);
@@ -1584,39 +1781,69 @@ async function discardBranch(nodeId) {
 async function commitBranch(nodeId) {
   const node = state.nodes[nodeId];
   if (!node || node.isTrunk) return;
-  await confirm('Commit to Main', 'Summarize this branch and add it as context to the trunk?', async () => {
-    const msgs = await getMessages(nodeId);
-    const convoMsgs = msgs.filter(m => m.role !== 'system');
-    const summary = await generateSummary(convoMsgs);
-    const trunk = Object.values(state.nodes).find(n => n.isTrunk && n.convoId === node.convoId);
-    if (!trunk) return;
-    const commitNote = `📌 Committed branch "${node.label}":\n${summary}`;
-    await addMessage(trunk.id, 'assistant', commitNote);
-    // Soft-delete
-    node.resolved = true;
-    node.status = 'committed';
-    node.resolvedAt = Date.now();
-    node.commitSummary = summary;
-    await dbPut('nodes', node);
-    state.nodes[nodeId] = node;
+  
+  // Get branch messages
+  const msgs = await getMessages(nodeId);
+  const convoMsgs = msgs.filter(m => m.role !== 'system');
+  
+  if (convoMsgs.length === 0) {
+    alert('No messages to commit from this branch.');
+    return;
+  }
+  
+  // Show commit modal for message selection
+  const selectedMessages = await showCommitModal(node.label, convoMsgs);
+  
+  if (!selectedMessages || selectedMessages.length === 0) {
+    // User cancelled or selected nothing
+    return;
+  }
+  
+  // Get trunk node
+  const trunk = Object.values(state.nodes).find(n => n.isTrunk && n.convoId === node.convoId);
+  if (!trunk) return;
+  
+  // Add header message
+  const headerMsg = `📌 Committed ${selectedMessages.length} message${selectedMessages.length !== 1 ? 's' : ''} from branch "${node.label}":`;
+  await addMessage(trunk.id, 'assistant', headerMsg);
+  
+  // Inject selected messages to trunk
+  for (const msg of selectedMessages) {
+    await addMessage(trunk.id, msg.role, msg.content);
+  }
+  
+  // Generate summary for commit metadata (optional, for action log)
+  const summaryText = `${selectedMessages.length} of ${convoMsgs.length} messages injected`;
+  
+  // Soft-delete branch
+  node.resolved = true;
+  node.status = 'committed';
+  node.resolvedAt = Date.now();
+  node.commitSummary = summaryText;
+  await dbPut('nodes', node);
+  state.nodes[nodeId] = node;
 
-    await logAction(node.convoId, 'committed', nodeId, node.label,
-      `Branch "${node.label}" committed — summary added to trunk`, { summary });
+  await logAction(node.convoId, 'committed', nodeId, node.label,
+    `Branch "${node.label}" committed — ${selectedMessages.length} messages injected to trunk`, 
+    { 
+      selectedCount: selectedMessages.length,
+      totalCount: convoMsgs.length,
+      messageIndices: selectedMessages.map((msg, idx) => convoMsgs.indexOf(msg))
+    });
 
-    await setActiveNode(trunk.id);
-    await renderTree();
-  });
+  await setActiveNode(trunk.id);
+  await renderTree();
 }
 
 async function promoteBranch(nodeId) {
   const node = state.nodes[nodeId];
   if (!node || node.isTrunk) return;
-  await confirm('Promote to Main', 'This branch becomes the trunk. Sibling branches at this fork will be soft-deleted (preserved in audit). Continue?', async () => {
+  await confirm('Promote to Main', 'This branch becomes a new conversation with full original context. Original conversation remains intact. Sibling branches will be soft-deleted. Continue?', async () => {
     const parent = state.nodes[node.parentId];
     const forkEntry = parent?.forks.find(f => f.branchIds.includes(nodeId));
     const discardedSibLabels = [];
 
-    // Soft-delete siblings
+    // Soft-delete siblings in ORIGINAL conversation
     if (forkEntry) {
       for (const sibId of forkEntry.branchIds) {
         if (sibId === nodeId) continue;
@@ -1632,45 +1859,49 @@ async function promoteBranch(nodeId) {
       }
     }
 
-    // Copy branch messages to trunk after fork point
+    // Create NEW conversation with full trunk history + branch messages
     const trunk = Object.values(state.nodes).find(n => n.isTrunk && n.convoId === node.convoId);
     if (!trunk) return;
+    
+    // Get ALL trunk messages (full history)
     const trunkMsgs = await getMessages(trunk.id);
-    const toDelete = trunkMsgs.filter((m, idx) => idx > (node.forkAfterMsgIdx ?? trunkMsgs.length));
-    for (const m of toDelete) {
-      await dbDelete('messages', m.id);
-      const i = state.messages[trunk.id]?.indexOf(m);
-      if (i > -1) state.messages[trunk.id].splice(i, 1);
+    const branchMsgs = await getMessages(nodeId);
+    
+    // Create new conversation
+    const { trunkId, convo } = await createConversation(`Promote: ${node.label} (${new Date().toLocaleDateString()})`);
+    
+    // Copy ALL trunk messages up to fork point (full context)
+    const msgsUpToFork = trunkMsgs.slice(0, (node.forkAfterMsgIdx ?? 0) + 1);
+    for (const m of msgsUpToFork.filter(mm => mm.role !== 'system')) {
+      await addMessage(trunkId, m.role, m.content);
     }
-    const branchMsgs = (await getMessages(nodeId)).filter(m => m.role !== 'system');
-    for (const m of branchMsgs) await addMessage(trunk.id, m.role, m.content);
-    // Invalidate trunk message cache
-    delete state.messages[trunk.id];
-
-    // Soft-delete this branch (its content now lives on trunk)
+    
+    // Append branch messages (new direction)
+    for (const m of branchMsgs.filter(mm => mm.role !== 'system')) {
+      await addMessage(trunkId, m.role, m.content);
+    }
+    
+    // Mark original branch as 'promoted' in ORIGINAL conversation
     node.status = 'promoted';
     node.resolvedAt = Date.now();
+    node.promotedToConvoId = convo.id;
     await dbPut('nodes', node);
     state.nodes[nodeId] = node;
 
-    if (parent && forkEntry) {
-      parent.forks = parent.forks.filter(f => f !== forkEntry);
-      await dbPut('nodes', parent);
-    }
-
     await logAction(node.convoId, 'promoted', nodeId, node.label,
-      `Branch "${node.label}" promoted to trunk from msg ${node.forkAfterMsgIdx + 1}` +
-      (discardedSibLabels.length ? ` — discarded siblings: ${discardedSibLabels.join(', ')}` : ''));
+      `Branch "${node.label}" promoted to new conversation "${convo.title}" from msg ${node.forkAfterMsgIdx + 1}` +
+      (discardedSibLabels.length ? ` — discarded siblings: ${discardedSibLabels.join(', ')}` : ''),
+      { newConvoId: convo.id });
 
-    await setActiveNode(trunk.id);
     await renderTree();
+    await setActiveNode(trunkId);
   });
 }
 
 async function splitToNewTree(nodeId) {
   const node = state.nodes[nodeId];
   if (!node || node.isTrunk) return;
-  await confirm('Split to New Tree', 'This branch becomes an independent new conversation. It will be hidden from this tree but preserved in the audit log.', async () => {
+  await confirm('Split to New Tree', 'This branch becomes an independent new conversation. It will remain visible in this tree for audit purposes.', async () => {
     const msgs = await getMessages(nodeId);
     const { trunkId, convo } = await createConversation(`Split: ${node.label} (${new Date().toLocaleDateString()})`);
     for (const m of msgs.filter(mm => mm.role !== 'system')) {
@@ -1726,25 +1957,52 @@ async function renderTree() {
       // Render forks and branches
       for (const fork of (trunk.forks || [])) {
         const forkMsgCount = fork.forkMsgIdx + 1;
-        // Count active branches for this fork
-        const activeBranches = fork.branchIds.filter(bid => {
+        // Show all branches (active, committed, discarded, promoted, split)
+        const visibleBranches = fork.branchIds.filter(bid => {
           const bn = state.nodes[bid] || nodes.find(n=>n.id===bid);
-          return bn && (!bn.status || bn.status === 'active' || bn.status === 'committed');
+          return bn; // Show all branch statuses
         });
-        if (activeBranches.length === 0) continue; // hide fork if all branches resolved
+        if (visibleBranches.length === 0) continue; // hide fork if no branches exist
         html += `<div class="fork-connector">fork @ msg ${forkMsgCount}</div>`;
         for (const bid of fork.branchIds) {
           const bn = state.nodes[bid] || nodes.find(n=>n.id===bid);
           if (!bn) continue;
-          // Hide discarded/promoted/split from active tree
-          if (bn.status === 'discarded' || bn.status === 'promoted' || bn.status === 'split') continue;
-          const statusIcon = bn.status === 'committed' ? ' ✓' : '';
+          // Show all branches including split
+          
+          const isDiscarded = bn.status === 'discarded';
+          const isPromoted = bn.status === 'promoted';
+          const isCommitted = bn.status === 'committed';
+          const isSplit = bn.status === 'split';
+          
+          let statusIcon = '';
+          let badgeText = 'BR';
+          let badgeStyle = `background:${bn.color}22;color:${bn.color}`;
+          let specialClass = '';
+          
+          if (isPromoted) {
+            statusIcon = ' ↑';
+            badgeText = bn.promotedToConvoId ? `⬆ PROMOTED → #${bn.promotedToConvoId.slice(-4)}` : '⬆ PROMOTED';
+            badgeStyle = 'background:var(--blue-light);color:var(--blue);font-weight:bold';
+            specialClass = ' promoted';
+          } else if (isSplit) {
+            statusIcon = ' ⎇';
+            badgeText = bn.splitToConvoId ? `⎇ SPLIT → #${bn.splitToConvoId.slice(-4)}` : '⎇ SPLIT';
+            badgeStyle = 'background:#e8f5e9;color:#7b1fa2;font-weight:bold';
+            specialClass = ' split';
+          } else if (isCommitted) {
+            statusIcon = ' ✓';
+          } else if (isDiscarded) {
+            badgeText = '🗑 DISCARDED';
+            badgeStyle = '';
+            specialClass = ' discarded';
+          }
+          
           const label = bn.label + statusIcon;
-          html += `<div class="tree-node branch-node ${bn.id === state.activeNodeId ? 'active':''}" data-node="${bn.id}" data-convo="${convo.id}" style="${bn.id===state.activeNodeId?'border-left-color:'+bn.color:''}">
+          html += `<div class="tree-node branch-node${specialClass} ${bn.id === state.activeNodeId ? 'active':''}" data-node="${bn.id}" data-convo="${convo.id}" style="${bn.id===state.activeNodeId?'border-left-color:'+bn.color:''}">
             <div class="node-dot" style="background:${bn.color}"></div>
             <div class="node-label">${esc(label)}</div>
             <button class="node-edit-btn" data-rename-branch="${bn.id}" title="Rename branch">✏</button>
-            <span class="node-badge" style="background:${bn.color}22;color:${bn.color}">BR</span>
+            <span class="node-badge${specialClass}" style="${badgeStyle}">${badgeText}</span>
           </div>`;
         }
       }
@@ -1867,23 +2125,60 @@ async function renderChat() {
   const title = document.getElementById('chatNodeTitle');
   const desc = document.getElementById('chatNodeDesc');
 
+  const isDiscarded = node.status === 'discarded';
+
   if (node.isTrunk) {
     badge.style.cssText = 'background:var(--blue-light);color:var(--blue);';
     badge.textContent = 'TRUNK';
     title.textContent = 'Main Conversation';
-    desc.textContent = `${(node.forks||[]).length} fork(s) created`;
+    const forkCount = (node.forks||[]).length;
+    const msgCount = (await getMessages(nodeId)).filter(m => m.role !== 'system').length;
+    desc.textContent = `${msgCount} message${msgCount !== 1 ? 's' : ''} · ${forkCount} fork${forkCount !== 1 ? 's' : ''}`;
     ['btnDiscard','btnCommit','btnPromote','btnSplit'].forEach(id => {
       document.getElementById(id).classList.remove('visible');
     });
   } else {
-    badge.style.cssText = `background:${node.color}22;color:${node.color};`;
-    badge.textContent = node.label.toUpperCase();
-    title.textContent = node.label;
-    desc.textContent = node.resolved ? 'Resolved' : 'Active branch';
+    if (isDiscarded) {
+      badge.style.cssText = 'background:#f5f5f5;color:#999;';
+      badge.textContent = '🔒 READ-ONLY';
+      title.textContent = node.label;
+      desc.textContent = 'Resolved: Discarded • Read-only mode';
+    } else {
+      badge.style.cssText = `background:${node.color}22;color:${node.color};`;
+      badge.textContent = node.label.toUpperCase();
+      title.textContent = node.label;
+      
+      // Show context info for branches
+      const branchMsgs = (await getMessages(nodeId)).filter(m => m.role !== 'system').length;
+      const snaps = await dbGetAllByIndex('snapshots', 'nodeId', nodeId);
+      const snapshotCount = snaps.length && snaps[0].messages ? snaps[0].messages.length : 0;
+      
+      if (node.resolved) {
+        // Show resolution type
+        let resolutionText = 'Resolved';
+        if (node.status === 'committed') {
+          resolutionText = 'Resolved: Commit to Main';
+        } else if (node.status === 'promoted') {
+          const targetId = node.promotedToConvoId ? ` → Conv #${node.promotedToConvoId.slice(-4)}` : '';
+          resolutionText = `Resolved: Promoted to New Conversation${targetId}`;
+        } else if (node.status === 'split') {
+          const targetId = node.splitToConvoId ? ` → Conv #${node.splitToConvoId.slice(-4)}` : '';
+          resolutionText = `Resolved: Split to New Conversation${targetId}`;
+        }
+        desc.textContent = resolutionText;
+      } else {
+        desc.textContent = `${branchMsgs} message${branchMsgs !== 1 ? 's' : ''} · ${snapshotCount} from trunk`;
+      }
+    }
     ['btnDiscard','btnCommit','btnPromote','btnSplit'].forEach(id => {
-      document.getElementById(id).classList.toggle('visible', !node.resolved);
+      document.getElementById(id).classList.toggle('visible', !node.resolved && !isDiscarded);
     });
   }
+
+  // Disable input controls for discarded branches
+  document.getElementById('userInput').disabled = isDiscarded;
+  document.getElementById('sendBtn').disabled = isDiscarded;
+  document.getElementById('addForkBtn').disabled = !node.isTrunk || isDiscarded;
 
   // Messages
   const msgs = await getMessages(nodeId);
@@ -1898,7 +2193,9 @@ async function renderChat() {
 
   // If branch, show context note
   if (!node.isTrunk) {
-    html += `<div class="context-note">⎇ Branch from main trunk · Context snapshot inherited</div>`;
+    const snaps = await dbGetAllByIndex('snapshots', 'nodeId', nodeId);
+    const snapshotCount = snaps.length && snaps[0].messages ? snaps[0].messages.length : 0;
+    html += `<div class="context-note">⎇ Branch from main trunk · ${snapshotCount} context message${snapshotCount !== 1 ? 's' : ''} inherited</div>`;
   }
 
   // Show fork markers on trunk
@@ -1947,9 +2244,76 @@ async function renderChat() {
     btn.addEventListener('click', () => openForkPanel(parseInt(btn.dataset.msgidx)));
   });
 
-  // Update addForkBtn
+  // Update addForkBtn (already set in header section above)
   const hasMsgs = msgs.filter(m=>m.role==='assistant').length > 0;
-  document.getElementById('addForkBtn').disabled = !hasMsgs || !node.isTrunk;
+  if (!isDiscarded) {
+    document.getElementById('addForkBtn').disabled = !hasMsgs || !node.isTrunk;
+  }
+  
+  // Update context counter
+  await updateContextCounter(nodeId);
+}
+
+async function updateContextCounter(nodeId) {
+  const node = state.nodes[nodeId];
+  if (!node) return;
+  
+  const counter = document.getElementById('contextCounter');
+  const tooltip = document.getElementById('contextTooltip');
+  
+  let totalContext = 0;
+  let snapshotCount = 0;
+  let branchCount = 0;
+  let trunkTotal = 0;
+  
+  if (node.isTrunk) {
+    // Trunk: count all messages
+    const msgs = await getMessages(nodeId);
+    totalContext = msgs.filter(m => m.role !== 'system').length;
+    counter.textContent = `Context: ${totalContext}`;
+    counter.title = `${totalContext} message${totalContext !== 1 ? 's' : ''} in trunk`;
+  } else {
+    // Branch: snapshot + branch messages
+    const snaps = await dbGetAllByIndex('snapshots', 'nodeId', nodeId);
+    snapshotCount = snaps.length && snaps[0].messages ? snaps[0].messages.length : 0;
+    
+    const msgs = await getMessages(nodeId);
+    branchCount = msgs.filter(m => m.role !== 'system').length;
+    totalContext = snapshotCount + branchCount;
+    
+    // Get trunk total for comparison
+    const trunk = Object.values(state.nodes).find(n => n.isTrunk && n.convoId === node.convoId);
+    if (trunk) {
+      const trunkMsgs = await getMessages(trunk.id);
+      trunkTotal = trunkMsgs.filter(m => m.role !== 'system').length;
+    }
+    
+    counter.textContent = `Context: ${totalContext}`;
+    
+    // Tooltip with comparison
+    const saved = trunkTotal - totalContext;
+    counter.title = `Branch: ${totalContext} msgs (${snapshotCount} from trunk + ${branchCount} new)`;
+    
+    // Show detailed tooltip on hover
+    counter.onmouseenter = (e) => {
+      if (trunkTotal > 0) {
+        tooltip.textContent = `Branch: ${totalContext} msgs | Full trunk: ${trunkTotal} msgs | Saved: ${saved} msgs (${Math.round((saved/trunkTotal)*100)}%)`;
+        tooltip.style.left = (e.target.offsetLeft) + 'px';
+        tooltip.style.bottom = '45px';
+        tooltip.classList.add('visible');
+      }
+    };
+    counter.onmouseleave = () => {
+      tooltip.classList.remove('visible');
+    };
+  }
+  
+  // Color based on size
+  counter.className = '';
+  if (totalContext < 20) counter.classList.add('ctx-green');
+  else if (totalContext < 40) counter.classList.add('ctx-yellow');
+  else if (totalContext < 60) counter.classList.add('ctx-orange');
+  else counter.classList.add('ctx-red');
 }
 
 function showTyping() {
@@ -1985,18 +2349,25 @@ async function sendMessage() {
   try {
     const msgs = await getMessages(nodeId);
     const node = state.nodes[nodeId];
-    const apiMsgs = msgs
-      .filter(m => m.role !== 'system')
-      .map(m => ({ role: m.role, content: m.content }));
-
-    // For branches, prepend snapshot as system message
-    let systemNote = undefined;
+    
+    // Build API message array with exact context
+    let apiMsgs = [];
+    
+    // For branches, prepend exact snapshot messages
     if (!node.isTrunk) {
       const snaps = await dbGetAllByIndex('snapshots','nodeId', nodeId);
-      if (snaps.length) systemNote = `Context from parent conversation:\n${snaps[0].summary}`;
+      if (snaps.length && snaps[0].messages) {
+        apiMsgs = [...snaps[0].messages];  // Exact trunk context at fork point
+      }
     }
+    
+    // Add current node messages (excluding system notes)
+    const currentMsgs = msgs
+      .filter(m => m.role !== 'system')
+      .map(m => ({ role: m.role, content: m.content }));
+    apiMsgs = [...apiMsgs, ...currentMsgs];
 
-    const reply = await callLM(apiMsgs, systemNote);
+    const reply = await callLM(apiMsgs);  // No systemNote - context is in messages
     removeTyping();
     await addMessage(nodeId, 'assistant', reply);
     await renderChat();
@@ -2170,14 +2541,17 @@ async function exportConversationMD() {
         md += `| **Created** | ${fmtTime(bn.createdAt)} |\n`;
         if (bn.resolvedAt) md += `| **Resolved** | ${fmtTime(bn.resolvedAt)} |\n`;
         if (bn.commitSummary) md += `| **Commit summary** | ${bn.commitSummary.replace(/\n/g,' ').slice(0,120)}… |\n`;
+        if (bn.promotedToConvoId) md += `| **Promoted to** | Conversation \`${bn.promotedToConvoId}\` |\n`;
         if (bn.splitToConvoId) md += `| **Split to** | Conversation \`${bn.splitToConvoId}\` |\n`;
         md += `\n`;
 
         // Context snapshot
         const snaps = await dbGetAllByIndex('snapshots', 'nodeId', bn.id);
-        if (snaps.length) {
+        if (snaps.length && snaps[0].messages) {
+          const msgCount = snaps[0].messages.length;
+          const model = snaps[0].model || 'unknown';
           md += `**Context Snapshot** _(inherited from parent at fork)_\n\n`;
-          md += `> ${snaps[0].summary.replace(/\n/g, '\n> ')}\n\n`;
+          md += `> Inherited ${msgCount} message${msgCount !== 1 ? 's' : ''} from parent • Model: ${model}\n\n`;
         }
 
         // Messages
@@ -2188,7 +2562,7 @@ async function exportConversationMD() {
     }
 
     // Footer
-    md += `_Exported by ORAND Praxis v1.3 · ${exportDate}_\n`;
+    md += `_Exported by ORAND Praxis v1.7 · ${exportDate}_\n`;
 
     // ── download ─────────────────────────────────────────────────────────────
     // showSaveFilePicker is blocked on file:// origins — always use blob download
@@ -2442,6 +2816,117 @@ function confirm(title, message, onOk) {
   });
 }
 
+// ── COMMIT MODAL ──────────────────────────────────────────────────────────────
+function showCommitModal(branchLabel, messages) {
+  return new Promise(resolve => {
+    const modal = document.getElementById('commitModal');
+    const messageList = document.getElementById('commitMessageList');
+    const selectedCount = document.getElementById('commitSelectedCount');
+    const okBtn = document.getElementById('commitOk');
+    const cancelBtn = document.getElementById('commitCancel');
+    const selectAllBtn = document.getElementById('commitSelectAll');
+    
+    // Set title
+    document.getElementById('commitModalTitle').textContent = `Select Messages from "${branchLabel}"`;
+    
+    // Track selected state
+    const selected = new Set(messages.map((_, idx) => idx)); // All selected by default
+    
+    // Update counter
+    const updateCounter = () => {
+      const count = selected.size;
+      selectedCount.textContent = `${count} message${count !== 1 ? 's' : ''} selected`;
+      okBtn.disabled = count === 0;
+    };
+    
+    // Render message list
+    const renderMessages = () => {
+      let html = '';
+      messages.forEach((msg, idx) => {
+        const isSelected = selected.has(idx);
+        const preview = msg.content.length > 200 ? msg.content.substring(0, 200) + '...' : msg.content;
+        html += `
+          <div class="commit-message-item ${isSelected ? 'selected' : ''}" data-index="${idx}">
+            <input type="checkbox" class="commit-message-checkbox" ${isSelected ? 'checked' : ''} data-index="${idx}">
+            <div class="commit-message-content">
+              <div class="commit-message-role ${msg.role}">${msg.role}</div>
+              <div class="commit-message-text">${esc(preview)}</div>
+            </div>
+          </div>
+        `;
+      });
+      messageList.innerHTML = html;
+      updateCounter();
+      
+      // Bind checkbox events
+      messageList.querySelectorAll('.commit-message-checkbox').forEach(cb => {
+        cb.addEventListener('change', e => {
+          const idx = parseInt(e.target.dataset.index);
+          if (e.target.checked) {
+            selected.add(idx);
+          } else {
+            selected.delete(idx);
+          }
+          renderMessages();
+        });
+      });
+      
+      // Bind item click events (toggle selection)
+      messageList.querySelectorAll('.commit-message-item').forEach(item => {
+        item.addEventListener('click', e => {
+          if (e.target.classList.contains('commit-message-checkbox')) return; // Already handled
+          const idx = parseInt(item.dataset.index);
+          if (selected.has(idx)) {
+            selected.delete(idx);
+          } else {
+            selected.add(idx);
+          }
+          renderMessages();
+        });
+      });
+    };
+    
+    renderMessages();
+    modal.classList.add('visible');
+    
+    // Select All button handler
+    const handleSelectAll = () => {
+      if (selected.size === messages.length) {
+        // Deselect all
+        selected.clear();
+      } else {
+        // Select all
+        messages.forEach((_, idx) => selected.add(idx));
+      }
+      renderMessages();
+    };
+    
+    // Bind Select All button (single instance, removed on cleanup)
+    const selectAllHandler = handleSelectAll;
+    selectAllBtn.addEventListener('click', selectAllHandler);
+    
+    // Cleanup function
+    const cleanup = () => {
+      modal.classList.remove('visible');
+      selectAllBtn.removeEventListener('click', selectAllHandler);
+      okBtn.replaceWith(okBtn.cloneNode(true));
+      cancelBtn.replaceWith(cancelBtn.cloneNode(true));
+    };
+    
+    // Event listeners
+    document.getElementById('commitOk').addEventListener('click', () => {
+      const selectedMessages = messages.filter((_, idx) => selected.has(idx));
+      cleanup();
+      resolve(selectedMessages);
+    }, { once: true });
+    
+    document.getElementById('commitCancel').addEventListener('click', () => {
+      cleanup();
+      resolve(null); // User cancelled
+    }, { once: true });
+  });
+}
+
 // ── EVENTS ────────────────────────────────────────────────────────────────────
 function bindEvents() {
   // Tab switching
@@ -2542,6 +3027,13 @@ function bindEvents() {
   document.getElementById('confirmModal').addEventListener('click', e => {
     if (e.target === document.getElementById('confirmModal')) {
       document.getElementById('confirmModal').classList.remove('visible');
+    }
+  });
+  
+  // Click outside commit modal
+  document.getElementById('commitModal').addEventListener('click', e => {
+    if (e.target === document.getElementById('commitModal')) {
+      document.getElementById('commitModal').classList.remove('visible');
     }
   });
 }

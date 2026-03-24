@@ -1,0 +1,1135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Local RAG Client</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.2/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <!-- Mammoth.js for .docx support -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+    <!-- PDF.js for .pdf support -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body {
+            background-color: #0f172a; /* Slate 900 */
+            color: #e2e8f0; /* Slate 200 */
+        }
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1e293b; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #475569; 
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #64748b; 
+        }
+
+        .prose p {
+            margin-bottom: 0.75em;
+        }
+        .prose pre {
+            background-color: #1e293b;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            overflow-x: auto;
+            margin-top: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+        .prose code {
+            background-color: #334155;
+            padding: 0.2rem 0.4rem;
+            border-radius: 0.25rem;
+            font-size: 0.875em;
+        }
+        .prose pre code {
+            background-color: transparent;
+            padding: 0;
+            color: inherit;
+        }
+        .prose ul {
+            list-style-type: disc;
+            padding-left: 1.5em;
+            margin-bottom: 0.75em;
+        }
+        .prose ol {
+            list-style-type: decimal;
+            padding-left: 1.5em;
+            margin-bottom: 0.75em;
+        }
+        .prose h3 {
+            color: #fff;
+            font-weight: 600;
+            margin-top: 1.5em;
+            margin-bottom: 0.5em;
+            font-size: 1.25rem;
+        }
+        .prose h4 {
+            color: #e2e8f0;
+            font-weight: 600;
+            margin-top: 1em;
+            margin-bottom: 0.5em;
+            font-size: 1rem;
+        }
+        
+        /* Loading Animation */
+        .typing-indicator span {
+            display: inline-block;
+            width: 6px;
+            height: 6px;
+            background-color: #94a3b8;
+            border-radius: 50%;
+            animation: typing 1s infinite;
+            margin: 0 2px;
+        }
+        .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+        .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+        
+        @keyframes typing {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-4px); }
+        }
+
+        .glass-panel {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .nav-active {
+            background-color: #1e293b; /* slate-800 */
+            color: #ffffff;
+            border-right: 3px solid #10b981; /* emerald-500 */
+        }
+        .nav-inactive {
+            color: #94a3b8; /* slate-400 */
+        }
+        .nav-inactive:hover {
+            color: #ffffff;
+            background-color: #1e293b;
+        }
+        
+        /* Form Inputs */
+        input[type="checkbox"] {
+            accent-color: #10b981;
+        }
+    </style>
+</head>
+<body class="h-screen flex flex-col font-sans antialiased overflow-hidden">
+
+    <!-- Header -->
+    <header class="h-14 border-b border-slate-700 bg-slate-900/90 flex items-center justify-between px-4 shrink-0 z-20">
+        <div class="flex items-center gap-3">
+            <div class="w-8 h-8 rounded-lg bg-emerald-600 flex items-center justify-center text-white font-bold">
+                <i class="fa-solid fa-layer-group"></i>
+            </div>
+            <h1 class="font-semibold text-lg text-white">Local RAG <span class="text-slate-400 text-sm font-normal ml-1">Reviewer Client</span></h1>
+        </div>
+        
+        <div class="flex items-center gap-3">
+            <div id="connection-status" class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-800 text-xs border border-slate-700 cursor-pointer hover:bg-slate-700 transition-colors" onclick="openSettingsModal()">
+                <div class="w-2 h-2 rounded-full bg-red-500" id="status-dot"></div>
+                <span id="status-text">Disconnected</span>
+            </div>
+            <button onclick="openSettingsModal()" class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors" title="Settings">
+                <i class="fa-solid fa-gear"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <div class="flex-1 flex overflow-hidden relative">
+        
+        <!-- Sidebar -->
+        <aside class="w-80 bg-slate-900 border-r border-slate-700 flex flex-col shrink-0 hidden md:flex">
+            <!-- Navigation Tabs -->
+            <div class="flex flex-col pt-4 pb-2 border-b border-slate-700/50 space-y-1 px-3">
+                <button onclick="switchTab('chat')" id="nav-chat" class="nav-active w-full text-left py-2 px-3 rounded-lg flex items-center gap-3 transition-colors text-sm font-medium">
+                    <i class="fa-regular fa-comments w-4 text-center"></i> RAG Chat
+                </button>
+                <button onclick="switchTab('guide')" id="nav-guide" class="nav-inactive w-full text-left py-2 px-3 rounded-lg flex items-center gap-3 transition-colors text-sm font-medium">
+                    <i class="fa-solid fa-book-open w-4 text-center"></i> User Guide
+                </button>
+            </div>
+
+            <!-- Chat Actions -->
+            <div id="sidebar-actions" class="p-4 border-b border-slate-700/50">
+                <button onclick="startNewChat()" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-2 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors font-medium text-sm shadow-lg shadow-emerald-900/20">
+                    <i class="fa-solid fa-plus"></i> New RAG Session
+                </button>
+            </div>
+            
+            <!-- Controls Area -->
+            <div class="p-3 flex-1 overflow-y-auto custom-scrollbar">
+                
+                <!-- Knowledge Base Section (MOVED TO TOP & EXPANDED) -->
+                <div class="mb-4 bg-slate-800/40 border border-slate-700/50 rounded-xl p-3">
+                    <h3 class="text-xs font-semibold text-emerald-400 uppercase tracking-wider mb-2 flex items-center gap-2">
+                        <i class="fa-solid fa-database"></i> Knowledge Base
+                    </h3>
+                    <p class="text-[10px] text-slate-400 mb-2 leading-tight">
+                        Content added here acts as the <strong>sole truth</strong>. The model will ignore outside training data.
+                    </p>
+                    
+                    <div class="flex gap-2 mb-2">
+                         <label class="flex-1 cursor-pointer bg-slate-700 hover:bg-slate-600 text-slate-200 text-[10px] py-1.5 px-2 rounded border border-slate-600 flex items-center justify-center gap-1 transition-colors">
+                            <i class="fa-solid fa-upload"></i> Upload File
+                            <input type="file" class="hidden" accept=".txt,.md,.json,.csv,.docx,.pdf" onchange="handleFileUpload(event)">
+                        </label>
+                        <button onclick="clearContext()" class="bg-slate-700 hover:bg-red-900/50 text-slate-200 hover:text-red-300 text-[10px] py-1.5 px-2 rounded border border-slate-600 transition-colors" title="Clear Context">
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
+                    </div>
+
+                    <textarea id="reference-context" rows="6" class="w-full bg-slate-900 border border-slate-700 text-slate-200 text-xs rounded-lg focus:ring-emerald-500 focus:border-emerald-500 block p-2 resize-none placeholder-slate-600 font-mono" placeholder="Paste context or upload file..."></textarea>
+                    
+                    <div class="mt-2 flex items-center gap-2">
+                        <div class="h-2 w-2 rounded-full bg-slate-600" id="rag-status-dot"></div>
+                        <span class="text-[10px] text-slate-500" id="rag-status-text">No Context (General Chat)</span>
+                    </div>
+                </div>
+
+                <!-- Generator Section -->
+                <div class="mb-4 px-1">
+                    <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3 px-1 flex items-center gap-2">
+                        <i class="fa-solid fa-brain"></i> Generator
+                    </h3>
+                    
+                    <div class="mb-2">
+                        <div class="relative">
+                            <select id="model-select" class="w-full bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-lg focus:ring-emerald-500 focus:border-emerald-500 block p-2 appearance-none cursor-pointer hover:border-slate-600 transition-colors truncate pr-6">
+                                <option value="" disabled selected>Select generator...</option>
+                            </select>
+                            <div class="absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none text-slate-400">
+                                <i class="fa-solid fa-chevron-down text-[10px]"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Reviewer Section -->
+                <div class="border-t border-slate-700 pt-4 mb-4 px-1">
+                    <div class="mb-3 flex items-center justify-between">
+                        <h3 class="text-xs font-semibold text-amber-500 uppercase tracking-wider flex items-center gap-2">
+                            <i class="fa-solid fa-magnifying-glass-chart"></i> Reviewer
+                        </h3>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="enable-reviewer" class="sr-only peer" onchange="toggleReviewer()">
+                            <div class="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-600"></div>
+                        </label>
+                    </div>
+
+                    <div id="reviewer-controls" class="hidden transition-all duration-300 ease-in-out opacity-0">
+                        <div class="mb-3">
+                            <div class="relative">
+                                <select id="reviewer-model-select" class="w-full bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-lg focus:ring-amber-500 focus:border-amber-500 block p-2 appearance-none cursor-pointer hover:border-slate-600 transition-colors truncate pr-6">
+                                    <option value="" disabled selected>Select reviewer...</option>
+                                </select>
+                                <div class="absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none text-slate-400">
+                                    <i class="fa-solid fa-chevron-down text-[10px]"></i>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mb-2">
+                            <textarea id="reviewer-system-prompt" rows="3" class="w-full bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-lg focus:ring-amber-500 focus:border-amber-500 block p-2 resize-none placeholder-slate-600">You are a critical auditor. Verify if the generated answer is strictly supported by the provided context. If the answer contains information not in the context, flag it as a hallucination.</textarea>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="px-1 mt-4">
+                     <button onclick="fetchLocalModels()" class="w-full py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700 transition-colors flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-rotate"></i> Refresh All Models
+                    </button>
+                    <span id="model-count" class="block text-center text-[10px] text-slate-500 mt-2">0 models found</span>
+                </div>
+
+            </div>
+            
+            <div class="p-4 border-t border-slate-700 text-center bg-slate-900">
+                <p class="text-[10px] text-slate-600 uppercase tracking-widest font-semibold">Local Environment</p>
+            </div>
+        </aside>
+
+        <!-- Main Area Wrapper -->
+        <main class="flex-1 flex flex-col relative bg-slate-900 overflow-hidden">
+            
+            <!-- TAB 1: Chat Interface -->
+            <div id="tab-chat" class="tab-content flex-1 flex flex-col h-full relative">
+                <!-- Messages Container -->
+                <div id="chat-container" class="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 scroll-smooth">
+                    <!-- Welcome Message -->
+                    <div id="welcome-message" class="flex flex-col items-center justify-center h-full text-center space-y-5 opacity-100 transition-opacity duration-300">
+                        <div class="relative">
+                            <div class="w-20 h-20 bg-gradient-to-br from-emerald-600 to-teal-600 rounded-2xl flex items-center justify-center text-white text-3xl shadow-xl shadow-emerald-900/30">
+                                <i class="fa-solid fa-database"></i>
+                            </div>
+                            <div class="absolute -bottom-2 -right-2 w-8 h-8 bg-slate-800 rounded-lg flex items-center justify-center border border-slate-700 text-emerald-500">
+                                <i class="fa-solid fa-file-contract text-xs"></i>
+                            </div>
+                        </div>
+                        <div>
+                            <h2 class="text-2xl font-bold text-white mb-2">Local RAG Client</h2>
+                            <p class="text-slate-400 max-w-sm mx-auto text-sm leading-relaxed">
+                                Upload documents or paste text to the <strong>Knowledge Base</strong>. 
+                                The Generator will use <strong>ONLY</strong> that information to answer you.
+                            </p>
+                        </div>
+                        <div class="flex gap-3">
+                            <button onclick="openSettingsModal()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-sm text-slate-200 transition-colors">
+                                Setup Connection
+                            </button>
+                            <button onclick="switchTab('guide')" class="px-4 py-2 bg-transparent hover:bg-slate-800 text-emerald-400 hover:text-emerald-300 rounded-lg text-sm transition-colors">
+                                User Guide
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Input Area -->
+                <div class="p-4 border-t border-slate-700 bg-slate-900/95 backdrop-blur">
+                    <div class="max-w-4xl mx-auto relative">
+                        <!-- Error Toast -->
+                        <div id="error-toast" class="hidden absolute top-4 left-4 right-4 md:left-auto md:right-8 md:top-20 z-50 w-auto max-w-md bg-red-900/90 border border-red-500/50 text-red-100 px-4 py-3 rounded-lg text-sm flex items-start gap-3 backdrop-blur-md shadow-2xl transition-opacity duration-300">
+                            <i class="fa-solid fa-circle-exclamation text-red-400 mt-0.5"></i>
+                            <div class="flex-1">
+                                <span id="error-message" class="block leading-relaxed">Error message here</span>
+                            </div>
+                            <button onclick="this.parentElement.classList.add('hidden')" class="text-red-400 hover:text-white transition-colors"><i class="fa-solid fa-xmark"></i></button>
+                        </div>
+
+                        <form id="chat-form" onsubmit="handleSubmit(event)" class="relative group">
+                            <textarea 
+                                id="user-input" 
+                                rows="1" 
+                                class="w-full bg-slate-800 text-white rounded-xl pl-4 pr-12 py-3.5 border border-slate-700 focus:ring-2 focus:ring-emerald-500 focus:border-transparent resize-none overflow-hidden max-h-48 shadow-lg transition-all placeholder-slate-500"
+                                placeholder="Ask a question about your documents..."
+                                oninput="autoResize(this)"
+                                onkeydown="handleEnter(event)"
+                            ></textarea>
+                            <button 
+                                type="submit" 
+                                id="send-button"
+                                class="absolute right-2 bottom-2.5 p-2 bg-slate-700 text-slate-400 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                                disabled
+                            >
+                                <i class="fa-solid fa-paper-plane text-sm"></i>
+                            </button>
+                        </form>
+                        <p class="text-center text-[10px] text-slate-600 mt-3" id="rag-mode-indicator">
+                            No context active. Answering from general training data.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 2: User Guide -->
+            <div id="tab-guide" class="tab-content hidden flex-1 overflow-y-auto bg-slate-900">
+                <div class="max-w-3xl mx-auto p-8 md:p-12">
+                    <div class="prose prose-invert prose-slate max-w-none">
+                        <div class="flex items-center gap-3 mb-6">
+                            <div class="w-10 h-10 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-xl">
+                                <i class="fa-solid fa-book"></i>
+                            </div>
+                            <h1 class="text-3xl font-bold text-white m-0">User Guide</h1>
+                        </div>
+                        
+                        <h3>What is Local RAG?</h3>
+                        <p>
+                            <strong>RAG (Retrieval-Augmented Generation)</strong> restricts the AI to answer using <em>only</em> specific information you provide, rather than its general training data.
+                        </p>
+                        
+                        <div class="bg-emerald-900/30 border border-emerald-500/30 p-5 rounded-xl my-6">
+                            <h4 class="!mt-0 text-emerald-300">How to use Knowledge Base</h4>
+                            <ol class="text-sm text-slate-300 list-decimal pl-5 space-y-2">
+                                <li>
+                                    <strong>Add Content:</strong> Paste text directly into the "Knowledge Base" box in the sidebar, or use the <strong>Upload File</strong> button to load files (.txt, .md, .csv, .docx, .pdf).
+                                </li>
+                                <li>
+                                    <strong>Verify Status:</strong> The indicator below the text box will turn Green and say "RAG Active".
+                                </li>
+                                <li>
+                                    <strong>Ask Questions:</strong> Type your question. The Generator will now ignore its internal knowledge and use <em>only</em> your uploaded text to answer.
+                                </li>
+                            </ol>
+                        </div>
+
+                        <div class="bg-amber-900/20 border border-amber-500/20 p-5 rounded-xl my-6">
+                             <h4 class="!mt-0 text-amber-400">Reviewer Mode</h4>
+                             <p class="text-sm text-slate-300">
+                                Enable the <strong>Reviewer</strong> in the sidebar to double-check the Generator.
+                             </p>
+                             <ul class="text-sm text-slate-300 list-disc pl-5 space-y-1">
+                                 <li>The Reviewer acts as an auditor.</li>
+                                 <li>It reads your Context, the Generator's Answer, and checks for hallucinations (things made up that weren't in the text).</li>
+                             </ul>
+                        </div>
+
+                        <div class="bg-indigo-900/30 border border-indigo-500/30 p-5 rounded-xl my-6">
+                            <h4 class="!mt-0 text-indigo-300">Optimization & Limits</h4>
+                            <p class="text-sm text-slate-300 mb-2">
+                                For the best response time (under 10s), keep these limits in mind:
+                            </p>
+                            <ul class="text-sm text-slate-300 list-disc pl-5 space-y-1">
+                                <li><strong>Text Volume:</strong> Ideal is &lt; 10 pages (~20k chars). Max is ~15 pages. Most local models have an 8k token limit; exceeding this will cause truncation or errors.</li>
+                                <li><strong>File Size:</strong> Keep text files under 100KB and PDFs/DOCX under 5MB to ensure the browser doesn't freeze during parsing.</li>
+                            </ul>
+                        </div>
+
+                        <div class="bg-slate-800/50 border border-slate-700 rounded-xl p-6 my-8">
+                            <h3 class="!mt-0 flex items-center gap-2">
+                                <i class="fa-solid fa-server text-emerald-400"></i>
+                                Connection Setup
+                            </h3>
+                            <p class="text-sm">Ensure your local server is running and CORS is enabled.</p>
+                            <ul class="grid grid-cols-1 md:grid-cols-2 gap-4 list-none pl-0">
+                                <li class="bg-slate-800 p-4 rounded-lg border border-slate-700">
+                                    <strong class="text-white block mb-1">Ollama</strong>
+                                    <code class="text-[10px] bg-black/30 p-1 rounded text-green-400 block mb-2">OLLA_ORIGINS="*" ollama serve</code>
+                                </li>
+                                <li class="bg-slate-800 p-4 rounded-lg border border-slate-700">
+                                    <strong class="text-white block mb-1">LM Studio</strong>
+                                    <span class="text-slate-400 text-xs">Enable CORS in Server tab settings.</span>
+                                </li>
+                            </ul>
+                        </div>
+
+                        <div class="h-12"></div>
+                    </div>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 transition-opacity">
+        <div class="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-lg shadow-2xl transform transition-all scale-100">
+            <div class="flex items-center justify-between p-4 border-b border-slate-700">
+                <h3 class="text-lg font-semibold text-white">Connection Settings</h3>
+                <button onclick="closeSettingsModal()" class="text-slate-400 hover:text-white transition-colors">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+            
+            <div class="p-6 space-y-5">
+                <div>
+                    <label class="block text-sm font-medium text-slate-300 mb-1.5">Provider</label>
+                    <select id="provider-select" onchange="updateDefaultUrl()" class="w-full bg-slate-800 border border-slate-700 text-white text-sm rounded-lg focus:ring-emerald-500 focus:border-emerald-500 block p-2.5">
+                        <option value="ollama">Ollama</option>
+                        <option value="lmstudio">LM Studio / OpenAI Compatible</option>
+                    </select>
+                </div>
+                
+                <div>
+                    <label class="block text-sm font-medium text-slate-300 mb-1.5">Base URL</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="api-url" value="http://localhost:11434" class="flex-1 bg-slate-800 border border-slate-700 text-white text-sm rounded-lg focus:ring-emerald-500 focus:border-emerald-500 block p-2.5 font-mono" placeholder="http://localhost:11434">
+                        <button id="test-btn" onclick="checkConnection()" class="bg-slate-700 hover:bg-slate-600 text-white px-4 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 min-w-[80px] justify-center">
+                            <span>Test</span>
+                            <i id="test-spinner" class="fa-solid fa-spinner fa-spin hidden"></i>
+                        </button>
+                    </div>
+                    <p class="mt-2 text-xs text-slate-500" id="url-hint">Default for Ollama is <code class="bg-slate-800 px-1 rounded text-slate-400 border border-slate-700">http://localhost:11434</code></p>
+                </div>
+
+                <div id="connection-help" class="hidden p-4 bg-amber-900/20 border border-amber-500/30 rounded-lg">
+                    <h4 class="text-amber-400 text-sm font-bold flex items-center gap-2 mb-2">
+                        <i class="fa-solid fa-triangle-exclamation"></i> Connection Failed
+                    </h4>
+                    
+                    <div id="mixed-content-warning" class="hidden mb-3 p-2 bg-red-900/30 border border-red-500/30 rounded text-xs text-red-200">
+                        <strong>Mixed Content Error:</strong> You are accessing this site via HTTPS, but trying to connect to a local HTTP server.
+                        <br><br>
+                        Check the <a href="#" onclick="closeSettingsModal(); switchTab('guide');" class="underline font-bold">User Guide</a> for fixes.
+                    </div>
+
+                    <p class="text-xs text-slate-300 mb-2">
+                        Failed to fetch. Is your server running and CORS enabled?
+                    </p>
+                    <button onclick="closeSettingsModal(); switchTab('guide');" class="text-xs bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 px-2 py-1 rounded transition-colors">
+                        View Setup Instructions &rarr;
+                    </button>
+                </div>
+
+                <div id="connection-success" class="hidden p-4 bg-green-900/20 border border-green-500/30 rounded-lg flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-full bg-green-500/20 flex items-center justify-center text-green-500">
+                        <i class="fa-solid fa-check"></i>
+                    </div>
+                    <div>
+                        <h4 class="text-green-400 text-sm font-bold">Connected Successfully</h4>
+                        <p class="text-xs text-slate-300">Found <span id="success-model-count">0</span> models.</p>
+                    </div>
+                </div>
+
+            </div>
+            
+            <div class="p-4 border-t border-slate-700 flex justify-end gap-3">
+                <button onclick="closeSettingsModal()" class="text-slate-400 hover:text-white text-sm font-medium px-4 py-2 transition-colors">
+                    Cancel
+                </button>
+                <button onclick="saveSettings()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-lg shadow-emerald-900/20">
+                    Save & Close
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- State ---
+        let chatHistory = [];
+        let currentModel = ''; // Generator Model
+        let reviewerModel = ''; // Reviewer Model
+        let isReviewerEnabled = false;
+        let provider = localStorage.getItem('llm_provider') || 'ollama'; 
+        let apiUrl = localStorage.getItem('llm_api_url') || 'http://localhost:11434';
+        let abortController = null;
+
+        // --- Initialization ---
+        document.addEventListener('DOMContentLoaded', () => {
+            const savedUrl = localStorage.getItem('llm_api_url');
+            const savedProvider = localStorage.getItem('llm_provider');
+            
+            if (savedUrl) apiUrl = savedUrl;
+            if (savedProvider) provider = savedProvider;
+            
+            document.getElementById('api-url').value = apiUrl;
+            document.getElementById('provider-select').value = provider;
+            updateDefaultUrl(false); 
+
+            fetchLocalModels();
+            hljs.highlightAll();
+            
+            // Listen for context changes to update UI
+            document.getElementById('reference-context').addEventListener('input', updateRagStatus);
+            
+            // Set worker source for PDF.js
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        });
+
+        function toggleReviewer() {
+            const checkbox = document.getElementById('enable-reviewer');
+            const controls = document.getElementById('reviewer-controls');
+            isReviewerEnabled = checkbox.checked;
+            
+            if (isReviewerEnabled) {
+                controls.classList.remove('hidden');
+                setTimeout(() => controls.classList.remove('opacity-0'), 10);
+            } else {
+                controls.classList.add('opacity-0');
+                setTimeout(() => controls.classList.add('hidden'), 300);
+            }
+            validateInputs();
+        }
+
+        function updateRagStatus() {
+            const contextVal = document.getElementById('reference-context').value.trim();
+            const dot = document.getElementById('rag-status-dot');
+            const text = document.getElementById('rag-status-text');
+            const indicator = document.getElementById('rag-mode-indicator');
+            const sendBtn = document.getElementById('send-button');
+            const userInput = document.getElementById('user-input');
+
+            if (contextVal.length > 0) {
+                dot.className = "h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_5px_rgba(16,185,129,0.8)]";
+                text.innerText = "RAG Active (Strict Mode)";
+                text.className = "text-[10px] text-emerald-400 font-semibold";
+                
+                indicator.innerHTML = '<i class="fa-solid fa-lock text-emerald-500 mr-1"></i> <strong>RAG Active:</strong> Answering ONLY from your Knowledge Base.';
+                indicator.className = "text-center text-[10px] text-emerald-400 mt-3 bg-emerald-900/20 py-1 px-3 rounded-full mx-auto w-max border border-emerald-500/30";
+                
+                userInput.placeholder = "Ask a question about your uploaded content...";
+            } else {
+                dot.className = "h-2 w-2 rounded-full bg-slate-600";
+                text.innerText = "No Context (General Chat)";
+                text.className = "text-[10px] text-slate-500";
+                
+                indicator.innerHTML = 'No context active. Answering from general training data.';
+                indicator.className = "text-center text-[10px] text-slate-600 mt-3";
+                
+                userInput.placeholder = "Type a message...";
+            }
+        }
+        
+        async function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const filename = file.name.toLowerCase();
+            let text = '';
+
+            try {
+                if (filename.endsWith('.docx')) {
+                    const arrayBuffer = await file.arrayBuffer();
+                    const result = await mammoth.extractRawText({ arrayBuffer: arrayBuffer });
+                    text = result.value; 
+                    if(result.messages.length > 0) console.log("Mammoth messages:", result.messages);
+                } else if (filename.endsWith('.pdf')) {
+                    const arrayBuffer = await file.arrayBuffer();
+                    const loadingTask = pdfjsLib.getDocument({data: arrayBuffer});
+                    const pdf = await loadingTask.promise;
+                    
+                    let fullPdfText = "";
+                    // Limit page count for large PDFs to prevent crashing the browser
+                    const maxPages = pdf.numPages; 
+                    
+                    for (let i = 1; i <= maxPages; i++) {
+                        const page = await pdf.getPage(i);
+                        const textContent = await page.getTextContent();
+                        const pageText = textContent.items.map(item => item.str).join(" ");
+                        fullPdfText += `\n--- Page ${i} ---\n${pageText}`;
+                    }
+                    text = fullPdfText;
+                } else {
+                    // Regular text handling
+                    text = await new Promise((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onload = (e) => resolve(e.target.result);
+                        reader.onerror = (e) => reject(e);
+                        reader.readAsText(file);
+                    });
+                }
+
+                const contextArea = document.getElementById('reference-context');
+                const header = `\n\n--- FILE: ${file.name} ---\n`;
+                contextArea.value += (contextArea.value ? header : '') + text;
+                
+                updateRagStatus();
+            } catch (error) {
+                console.error("File upload error:", error);
+                showError("Failed to read file: " + error.message);
+            } finally {
+                // Clear input so same file can be selected again if needed
+                event.target.value = '';
+            }
+        }
+
+        function clearContext() {
+            const contextArea = document.getElementById('reference-context');
+            if(contextArea.value.trim() === '') return;
+
+            if(confirm("Remove all documents from Knowledge Base and start a new chat?")) {
+                contextArea.value = '';
+                updateRagStatus();
+                startNewChat();
+            }
+        }
+        
+        function validateInputs() {
+            const btn = document.getElementById('send-button');
+            const userInput = document.getElementById('user-input');
+            const hasText = userInput.value.trim().length > 0;
+            const hasGenerator = !!currentModel;
+            const hasReviewer = !isReviewerEnabled || (isReviewerEnabled && !!reviewerModel);
+            
+            if (hasText && hasGenerator && hasReviewer) {
+                btn.removeAttribute('disabled');
+                btn.classList.add('bg-emerald-600', 'text-white');
+                btn.classList.remove('bg-slate-700', 'text-slate-400');
+            } else {
+                btn.setAttribute('disabled', 'true');
+                btn.classList.remove('bg-emerald-600', 'text-white');
+                btn.classList.add('bg-slate-700', 'text-slate-400');
+            }
+        }
+
+        // --- Tab Logic ---
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+            document.getElementById(`tab-${tabId}`).classList.remove('hidden');
+            
+            const chatNav = document.getElementById('nav-chat');
+            const guideNav = document.getElementById('nav-guide');
+            const activeClass = ['nav-active'];
+            const inactiveClass = ['nav-inactive'];
+
+            if (tabId === 'chat') {
+                chatNav.classList.add(...activeClass);
+                chatNav.classList.remove(...inactiveClass);
+                guideNav.classList.add(...inactiveClass);
+                guideNav.classList.remove(...activeClass);
+            } else {
+                guideNav.classList.add(...activeClass);
+                guideNav.classList.remove(...inactiveClass);
+                chatNav.classList.add(...inactiveClass);
+                chatNav.classList.remove(...activeClass);
+            }
+        }
+
+        // --- Core Functions ---
+
+        async function fetchLocalModels() {
+            const generatorSelect = document.getElementById('model-select');
+            const reviewerSelect = document.getElementById('reviewer-model-select');
+            const statusDot = document.getElementById('status-dot');
+            const statusText = document.getElementById('status-text');
+            const modelCount = document.getElementById('model-count');
+
+            try {
+                statusText.innerText = 'Connecting...';
+                statusDot.className = 'w-2 h-2 rounded-full bg-yellow-500 animate-pulse';
+
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 5000); 
+
+                let endpoint = provider === 'ollama' ? `${apiUrl}/api/tags` : `${apiUrl}/v1/models`;
+
+                const response = await fetch(endpoint, {
+                    method: 'GET',
+                    signal: controller.signal,
+                });
+                
+                clearTimeout(timeoutId);
+
+                if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
+
+                const data = await response.json();
+                let models = [];
+
+                if (provider === 'ollama') {
+                    models = data.models || [];
+                } else {
+                    models = (data.data || []).map(m => ({ name: m.id }));
+                }
+
+                // Update Generator Select
+                generatorSelect.innerHTML = '<option value="" disabled selected>Select generator...</option>';
+                models.forEach(model => {
+                    const option = document.createElement('option');
+                    option.value = model.name;
+                    option.text = model.name;
+                    generatorSelect.appendChild(option);
+                });
+
+                // Update Reviewer Select
+                reviewerSelect.innerHTML = '<option value="" disabled selected>Select reviewer...</option>';
+                models.forEach(model => {
+                    const option = document.createElement('option');
+                    option.value = model.name;
+                    option.text = model.name;
+                    reviewerSelect.appendChild(option);
+                });
+
+                if (models.length > 0) {
+                    // Restore selections if valid
+                    if(currentModel && models.some(m => m.name === currentModel)) generatorSelect.value = currentModel;
+                    else {
+                        generatorSelect.value = models[0].name;
+                        currentModel = models[0].name;
+                    }
+
+                    if(reviewerModel && models.some(m => m.name === reviewerModel)) reviewerSelect.value = reviewerModel;
+                    // Dont auto-select reviewer, let user choose
+                }
+
+                modelCount.innerText = `${models.length} models found`;
+                statusDot.className = 'w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]';
+                statusText.innerText = 'Connected';
+                
+                document.getElementById('connection-help').classList.add('hidden');
+                validateInputs();
+
+            } catch (error) {
+                console.warn("Fetch Error:", error);
+                statusDot.className = 'w-2 h-2 rounded-full bg-red-500';
+                statusText.innerText = 'Error';
+                modelCount.innerText = 'Offline';
+                showError(`Failed to connect to ${apiUrl}`);
+            }
+        }
+
+        // Generic text generation function that returns a promise
+        async function generateText(model, messages, elementId, role) {
+             const responseElem = document.getElementById(elementId);
+             const contentDiv = responseElem.querySelector('.content-text');
+             let fullText = '';
+             
+             let endpoint = '';
+             let payload = {};
+
+             if (provider === 'ollama') {
+                 endpoint = `${apiUrl}/api/chat`;
+                 payload = { model: model, messages: messages, stream: true };
+             } else {
+                 endpoint = `${apiUrl}/v1/chat/completions`;
+                 payload = { model: model, messages: messages, stream: true, max_tokens: -1 };
+             }
+
+             const response = await fetch(endpoint, {
+                 method: 'POST',
+                 headers: { 'Content-Type': 'application/json' },
+                 body: JSON.stringify(payload),
+                 signal: abortController.signal
+             });
+
+             if (!response.ok) {
+                 let errDetail = `Status ${response.status}`;
+                 try {
+                     const json = await response.json();
+                     if (json.error && json.error.message) errDetail = json.error.message;
+                     else if (json.error) errDetail = json.error;
+                 } catch (e) {
+                     try { errDetail = await response.text(); } catch (e2) {}
+                 }
+
+                 // Detect Context Overflow
+                 if (errDetail.toLowerCase().includes('context') || errDetail.toLowerCase().includes('token')) {
+                     throw new Error(`<strong>Context Limit Exceeded</strong><br/>The document is too large for the model's current settings.<br/><br/><strong>Options:</strong><br/>1. Increase "Context Length" in LM Studio/Ollama.<br/>2. Upload a shorter document.`);
+                 }
+                 
+                 throw new Error(errDetail);
+             }
+
+             const reader = response.body.getReader();
+             const decoder = new TextDecoder();
+             
+             contentDiv.innerHTML = ''; 
+
+             while (true) {
+                 const { done, value } = await reader.read();
+                 if (done) break;
+
+                 const chunk = decoder.decode(value, { stream: true });
+                 const lines = chunk.split('\n');
+                 
+                 for (const line of lines) {
+                     const trimmedLine = line.trim();
+                     if (!trimmedLine) continue;
+                     
+                     if (provider === 'ollama') {
+                         try {
+                             const json = JSON.parse(trimmedLine);
+                             if (json.message && json.message.content) {
+                                 fullText += json.message.content;
+                                 updateContent(contentDiv, fullText);
+                             }
+                         } catch (e) { }
+                     } else {
+                         if (trimmedLine.startsWith('data: ')) {
+                             const dataStr = trimmedLine.substring(6);
+                             if (dataStr === '[DONE]') break;
+                             try {
+                                 const json = JSON.parse(dataStr);
+                                 if (json.choices && json.choices[0].delta && json.choices[0].delta.content) {
+                                     fullText += json.choices[0].delta.content;
+                                     updateContent(contentDiv, fullText);
+                                 }
+                             } catch (e) { }
+                         }
+                     }
+                 }
+             }
+             return fullText;
+        }
+
+        async function handleSubmit(event) {
+            event.preventDefault();
+            const input = document.getElementById('user-input');
+            const message = input.value.trim();
+            const revSystemPrompt = document.getElementById('reviewer-system-prompt').value;
+            const contextText = document.getElementById('reference-context').value.trim();
+            
+            if (!message || !currentModel) return;
+            if (isReviewerEnabled && !reviewerModel) {
+                showError("Please select a Reviewer model.");
+                return;
+            }
+
+            input.value = '';
+            input.style.height = 'auto'; 
+            switchTab('chat');
+
+            // 1. Add User Message
+            addMessageToUI('user', message);
+            chatHistory.push({ role: 'user', content: message });
+
+            const sendBtn = document.getElementById('send-button');
+            sendBtn.disabled = true;
+            sendBtn.classList.remove('bg-emerald-600', 'text-white');
+            sendBtn.classList.add('bg-slate-700', 'text-slate-400');
+            
+            abortController = new AbortController();
+
+            try {
+                // 2. Generator Step
+                const genId = 'msg-gen-' + Date.now();
+                addMessageToUI('assistant', '', genId, true);
+                
+                // Construct Generator Prompt
+                let finalSystemPrompt = "You are a helpful assistant.";
+                let hasRAG = false;
+
+                if (contextText) {
+                    hasRAG = true;
+                    // STRICT RAG PROMPT
+                    finalSystemPrompt = `You are a Local RAG (Retrieval Augmented Generation) agent.
+STRICT RULE: You must answer the user's question using ONLY the provided "Knowledge Base" below.
+Do NOT use your own internal training data.
+If the answer is not found in the Knowledge Base, explicitly state: "The provided documents do not contain the answer."
+Do not hallucinate facts or URLs.
+
+### KNOWLEDGE BASE ###
+${contextText}
+`;
+                }
+
+                // We typically just send full history to generator
+                const fullHistory = [{role: 'system', content: finalSystemPrompt}, ...chatHistory];
+                
+                const generatedResponse = await generateText(currentModel, fullHistory, genId, 'assistant');
+                
+                chatHistory.push({ role: 'assistant', content: generatedResponse });
+                
+                // 3. Reviewer Step (Optional)
+                if (isReviewerEnabled) {
+                    const revId = 'msg-rev-' + Date.now();
+                    addMessageToUI('reviewer', '', revId, true);
+                    
+                    // Construct prompt for Reviewer
+                    let reviewPrompt = `Here is a User Question: "${message}"\n\n`;
+                    
+                    if (hasRAG) {
+                        reviewPrompt += `The Generator was strictly instructed to use this Knowledge Base: 
+"""
+${contextText.substring(0, 2500)}${contextText.length > 2500 ? '... [truncated]' : ''}
+"""\n\n`;
+                    }
+                    
+                    reviewPrompt += `Here is the AI Response: "${generatedResponse}"\n\nPlease critique the AI Response based on accuracy to the Knowledge Base (if provided) and safety. Did it hallucinate info not in the text?`;
+
+                    const revMessages = [
+                        { role: 'system', content: revSystemPrompt },
+                        { role: 'user', content: reviewPrompt }
+                    ];
+
+                    const reviewResponse = await generateText(reviewerModel, revMessages, revId, 'reviewer');
+                }
+
+            } catch (error) {
+                if (error.name !== 'AbortError') {
+                    showError("Generation failed: " + error.message, 10000);
+                }
+            } finally {
+                sendBtn.disabled = false;
+                validateInputs();
+                abortController = null;
+            }
+        }
+
+        // --- UI Helpers ---
+
+        function updateContent(div, text) {
+            div.innerHTML = marked.parse(text);
+            hljs.highlightAll();
+            const container = document.getElementById('chat-container');
+            if(container.scrollHeight - container.scrollTop - container.clientHeight < 300) {
+               container.scrollTop = container.scrollHeight;
+            }
+        }
+
+        function addMessageToUI(role, text, id = null, isLoading = false) {
+            const container = document.getElementById('chat-container');
+            const welcome = document.getElementById('welcome-message');
+            if (welcome) welcome.classList.add('hidden');
+
+            const div = document.createElement('div');
+            div.className = `flex w-full mb-6 ${role === 'user' ? 'justify-end' : 'justify-start'}`;
+            if (id) div.id = id;
+
+            let avatar = '';
+            let bubbleClass = '';
+
+            if (role === 'user') {
+                avatar = `<div class="w-8 h-8 rounded-full bg-emerald-600 flex items-center justify-center shrink-0 ml-3 shadow-lg shadow-emerald-900/50"><i class="fa-solid fa-user text-xs text-white"></i></div>`;
+                bubbleClass = 'bg-emerald-600/20 border border-emerald-500/30 text-emerald-50 rounded-tr-sm';
+            } else if (role === 'assistant') {
+                avatar = `<div class="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center shrink-0 mr-3 shadow-lg shadow-slate-900/50" title="Generator"><i class="fa-solid fa-robot text-xs text-white"></i></div>`;
+                bubbleClass = 'bg-slate-800 border border-slate-700 text-slate-200 rounded-tl-sm';
+            } else if (role === 'reviewer') {
+                avatar = `<div class="w-8 h-8 rounded-full bg-amber-600 flex items-center justify-center shrink-0 mr-3 shadow-lg shadow-amber-900/50" title="Reviewer"><i class="fa-solid fa-magnifying-glass text-xs text-white"></i></div>`;
+                bubbleClass = 'bg-slate-800 border border-amber-500/50 text-slate-200 rounded-tl-sm relative overflow-hidden';
+            }
+
+            let contentHtml = '';
+            if (isLoading) {
+                contentHtml = `<div class="typing-indicator p-2"><span></span><span></span><span></span></div>`;
+            } else {
+                contentHtml = marked.parse(text);
+            }
+            
+            let extraBadge = role === 'reviewer' ? '<div class="text-[10px] text-amber-500 uppercase tracking-widest font-bold mb-2 flex items-center gap-1"><i class="fa-solid fa-check-double"></i> Audit</div>' : '';
+
+            div.innerHTML = `
+                ${(role === 'assistant' || role === 'reviewer') ? avatar : ''}
+                <div class="max-w-[85%] md:max-w-[75%] rounded-2xl px-4 py-3 ${bubbleClass} shadow-sm prose prose-invert prose-sm content-text">
+                    ${extraBadge}
+                    ${contentHtml}
+                </div>
+                ${role === 'user' ? avatar : ''}
+            `;
+
+            container.appendChild(div);
+            container.scrollTop = container.scrollHeight;
+            if(!isLoading) hljs.highlightAll();
+        }
+
+        function autoResize(textarea) {
+            textarea.style.height = 'auto';
+            textarea.style.height = textarea.scrollHeight + 'px';
+            validateInputs();
+        }
+
+        function handleEnter(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSubmit(e);
+            }
+        }
+
+        function startNewChat() {
+            chatHistory = [];
+            document.getElementById('chat-container').innerHTML = `
+                <div id="welcome-message" class="flex flex-col items-center justify-center h-full text-center space-y-5 opacity-100 transition-opacity duration-300">
+                        <div class="relative">
+                            <div class="w-20 h-20 bg-gradient-to-br from-emerald-600 to-teal-600 rounded-2xl flex items-center justify-center text-white text-3xl shadow-xl shadow-emerald-900/30">
+                                <i class="fa-solid fa-database"></i>
+                            </div>
+                            <div class="absolute -bottom-2 -right-2 w-8 h-8 bg-slate-800 rounded-lg flex items-center justify-center border border-slate-700 text-emerald-500">
+                                <i class="fa-solid fa-file-contract text-xs"></i>
+                            </div>
+                        </div>
+                        <div>
+                            <h2 class="text-2xl font-bold text-white mb-2">Local RAG Client</h2>
+                            <p class="text-slate-400 max-w-sm mx-auto text-sm leading-relaxed">
+                                Upload documents or paste text to the <strong>Knowledge Base</strong>. 
+                                The Generator will use <strong>ONLY</strong> that information to answer you.
+                            </p>
+                        </div>
+                        <div class="flex gap-3">
+                            <button onclick="openSettingsModal()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-sm text-slate-200 transition-colors">
+                                Setup Connection
+                            </button>
+                            <button onclick="switchTab('guide')" class="px-4 py-2 bg-transparent hover:bg-slate-800 text-emerald-400 hover:text-emerald-300 rounded-lg text-sm transition-colors">
+                                User Guide
+                            </button>
+                        </div>
+                </div>
+            `;
+            if (abortController) abortController.abort();
+            switchTab('chat');
+        }
+
+        // --- Settings Modal Logic ---
+
+        function openSettingsModal() {
+            document.getElementById('settings-modal').classList.remove('hidden');
+            updateDefaultUrl(false);
+        }
+
+        function closeSettingsModal() {
+            document.getElementById('settings-modal').classList.add('hidden');
+            document.getElementById('connection-success').classList.add('hidden');
+            document.getElementById('connection-help').classList.add('hidden');
+            document.getElementById('mixed-content-warning').classList.add('hidden');
+        }
+
+        function updateDefaultUrl(resetInput = true) {
+            const select = document.getElementById('provider-select');
+            const hint = document.getElementById('url-hint');
+            const input = document.getElementById('api-url');
+            
+            if (select.value === 'ollama') {
+                if(resetInput) input.value = 'http://localhost:11434';
+                hint.innerHTML = 'Default for Ollama is <code class="bg-slate-800 px-1 rounded text-slate-400 border border-slate-700">http://localhost:11434</code>';
+            } else {
+                if(resetInput) input.value = 'http://localhost:1234';
+                hint.innerHTML = 'Default for LM Studio is <code class="bg-slate-800 px-1 rounded text-slate-400 border border-slate-700">http://localhost:1234</code>';
+            }
+        }
+
+        async function checkConnection() {
+            const url = document.getElementById('api-url').value.replace(/\/$/, '');
+            const testProvider = document.getElementById('provider-select').value;
+            
+            const helpBox = document.getElementById('connection-help');
+            const successBox = document.getElementById('connection-success');
+            const mixedContentWarning = document.getElementById('mixed-content-warning');
+            const testBtn = document.getElementById('test-btn');
+            const spinner = document.getElementById('test-spinner');
+            
+            testBtn.classList.add('opacity-75', 'cursor-not-allowed');
+            spinner.classList.remove('hidden');
+            helpBox.classList.add('hidden');
+            successBox.classList.add('hidden');
+            mixedContentWarning.classList.add('hidden');
+
+            try {
+                let testUrl = testProvider === 'ollama' ? `${url}/api/tags` : `${url}/v1/models`;
+                const controller = new AbortController();
+                const id = setTimeout(() => controller.abort(), 3000);
+                
+                const res = await fetch(testUrl, { signal: controller.signal });
+                clearTimeout(id);
+
+                if(!res.ok) throw new Error("Status " + res.status);
+                
+                const data = await res.json();
+                let count = 0;
+                if(testProvider === 'ollama') count = (data.models || []).length;
+                else count = (data.data || []).length;
+
+                successBox.classList.remove('hidden');
+                document.getElementById('success-model-count').innerText = count;
+            } catch (e) {
+                console.warn("Connection test failed (handled):", e);
+                helpBox.classList.remove('hidden');
+                if (window.location.protocol === 'https:' && url.startsWith('http:')) {
+                    mixedContentWarning.classList.remove('hidden');
+                }
+            } finally {
+                testBtn.classList.remove('opacity-75', 'cursor-not-allowed');
+                spinner.classList.add('hidden');
+            }
+        }
+
+        function saveSettings() {
+            const urlInput = document.getElementById('api-url').value.replace(/\/$/, '');
+            apiUrl = urlInput;
+            provider = document.getElementById('provider-select').value;
+            localStorage.setItem('llm_api_url', apiUrl);
+            localStorage.setItem('llm_provider', provider);
+            fetchLocalModels();
+            closeSettingsModal();
+        }
+
+        function showError(msg, timeout = 5000) {
+            const toast = document.getElementById('error-toast');
+            document.getElementById('error-message').innerHTML = msg; // Changed to innerHTML
+            toast.classList.remove('hidden');
+            setTimeout(() => toast.classList.add('hidden'), timeout);
+        }
+
+        // Listeners for Model Selections
+        document.getElementById('model-select').addEventListener('change', (e) => {
+            currentModel = e.target.value;
+            validateInputs();
+        });
+        document.getElementById('reviewer-model-select').addEventListener('change', (e) => {
+            reviewerModel = e.target.value;
+            validateInputs();
+        });
+        document.getElementById('user-input').addEventListener('input', validateInputs);
+
+    </script>
+</body>
+</html>

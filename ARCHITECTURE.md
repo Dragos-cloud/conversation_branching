@@ -2,9 +2,9 @@
 
 ## Overview
 
-ORAND Praxis is a single-file HTML application that enables non-linear conversations with Large Language Models (LLMs). It implements a tree-based conversation structure with branching, forking, lifecycle management, and full-text search capabilities.
+ORAND Praxis is a single-file HTML application that enables non-linear conversations with Large Language Models (LLMs). It implements a tree-based conversation structure with branching, forking, lifecycle management, RAG document integration, and full-text search capabilities.
 
-**Version**: 1.6.3  
+**Version**: 2.0.0  
 **Last Modified**: 2026-03-24  
 **Architecture**: Client-side only (no backend server)
 
@@ -19,10 +19,11 @@ ORAND Praxis is a single-file HTML application that enables non-linear conversat
 5. [Branch Lifecycle](#branch-lifecycle)
 6. [State Management](#state-management)
 7. [Search System](#search-system)
-8. [Data Persistence](#data-persistence)
-9. [LLM Integration](#llm-integration)
-10. [Export System](#export-system)
-11. [Security & Privacy](#security--privacy)
+8. [RAG Document System](#rag-document-system-v20)
+9. [Data Persistence](#data-persistence)
+10. [LLM Integration](#llm-integration)
+11. [Export System](#export-system)
+12. [Security & Privacy](#security--privacy)
 
 ---
 
@@ -45,6 +46,7 @@ The application is organized into clearly separated sections (marked with `SECTI
 ├── LOGIC:branch   - Branch operations
 ├── LOGIC:search   - Full-text search functionality
 ├── LOGIC:export   - Markdown export functionality
+├── LOGIC:documents - RAG document processing
 ├── EVENTS         - Event handlers
 ├── INIT           - Application initialization
 └── USERGUIDE      - Built-in documentation
@@ -55,6 +57,7 @@ The application is organized into clearly separated sections (marked with `SECTI
 - **Frontend**: Vanilla JavaScript (ES6+), HTML5, CSS3
 - **Storage**: IndexedDB (browser-native database)
 - **LLM Integration**: LM Studio API (OpenAI-compatible)
+- **Document Processing**: PDF.js (v3.11.174), Mammoth.js (v1.6.0)
 - **Build**: None required (single HTML file)
 
 ---
@@ -63,7 +66,7 @@ The application is organized into clearly separated sections (marked with `SECTI
 
 ### Database Schema (IndexedDB)
 
-The application uses 5 object stores:
+The application uses 6 object stores:
 
 #### 1. **conversations**
 ```javascript
@@ -145,6 +148,19 @@ The application uses 5 object stores:
 // Index: convoId
 ```
 
+#### 6. **documents** (v2.0)
+```javascript
+{
+  id: string,              // Unique identifier
+  convoId: string,         // Parent conversation ID
+  filename: string,        // Original file name
+  content: string,         // Extracted text content
+  format: string,          // File extension (pdf, docx, txt, md, json, csv)
+  uploadedAt: number       // Timestamp
+}
+// Indexes: convoId, uploadedAt
+```
+
 ---
 
 ## Core Components
@@ -154,12 +170,14 @@ The application uses 5 object stores:
 ```javascript
 CFG = {
   DB_NAME: 'orand_brancher',
-  DB_VERSION: 2,
+  DB_VERSION: 3,                     // v2.0: Added documents store
   MAX_BRANCHES_PER_FORK: 4,
   BRANCH_CAN_BRANCH: false,          // Future: nested branching
   BRANCH_COLORS: ['#e74c3c','#27ae60','#8e44ad','#e67e22'],
   SUMMARY_MAX_TOKENS: 400,           // Deprecated in v1.5 (exact context used instead)
-  LM_DEFAULT_URL: 'http://localhost:1234'
+  LM_DEFAULT_URL: 'http://localhost:1234',
+  MAX_DOCUMENT_FILE_SIZE: 10485760,  // 10MB raw file upload limit
+  MAX_DOCUMENT_CONTENT_SIZE: 5242880 // 5MB extracted text content limit
 }
 ```
 
@@ -176,7 +194,8 @@ state = {
   lmConnected: boolean,               // LM Studio connection status
   searchQuery: string,                // Current search query
   searchResults: [],                  // Array of search result objects
-  activeSearchHighlight: string       // Search term being highlighted
+  activeSearchHighlight: string,      // Search term being highlighted
+  activeDocuments: []                 // Documents for active conversation (v2.0)
 }
 ```
 
@@ -582,6 +601,431 @@ Potential improvements documented in [VERSION_CONTROL_PROPOSALS.md](VERSION_CONT
 - Fuzzy matching
 - Search within specific conversations
 - Search history/saved searches
+
+---
+
+## RAG Document System (v2.0)
+
+### Overview
+
+Version 2.0 introduces Retrieval-Augmented Generation (RAG) capabilities, allowing users to upload documents that ground LLM responses in specific content. Documents are linked to conversations and automatically injected into LLM requests as system prompts.
+
+### Document Processing Pipeline
+
+```
+User Upload → File Validation → Format Detection → Parsing → Storage → Context Injection
+```
+
+### Document Storage Model
+
+Documents are stored per conversation in the `documents` object store:
+
+```javascript
+{
+  id: string,              // Unique document ID (UUID)
+  convoId: string,         // Parent conversation ID (foreign key)
+  filename: string,        // Original file name with extension
+  content: string,         // Extracted plain text content
+  format: string,          // File extension (pdf, docx, txt, md, json, csv)
+  uploadedAt: number       // Timestamp of upload
+}
+```
+
+**Key Design Decisions**:
+- Documents linked to conversations, not nodes (branches inherit parent conversation's docs)
+- One-to-many relationship: conversation → multiple documents
+- Text-only storage (no binary data retained after parsing)
+- No versioning (replaced on re-upload)
+
+### Document Parsing Functions
+
+#### 1. **parseDocumentFile(file)**
+
+Master parsing function that routes to format-specific handlers:
+
+```javascript
+async function parseDocumentFile(file) {
+  const filename = file.name.toLowerCase();
+  
+  if (filename.endsWith('.pdf')) {
+    return await parsePDF(file);
+  } else if (filename.endsWith('.docx')) {
+    return await parseDOCX(file);
+  } else {
+    return await parseTextFile(file);
+  }
+}
+```
+
+#### 2. **PDF Parsing (PDF.js)**
+
+```javascript
+// Uses PDF.js v3.11.174 from CDN
+// Worker: pdf.worker.min.js
+
+async function parsePDF(file) {
+  const arrayBuffer = await file.arrayBuffer();
+  pdfjsLib.GlobalWorkerOptions.workerSrc = '[CDN_URL]';
+  
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  let fullText = '';
+  
+  // Process each page sequentially
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const textContent = await page.getTextContent();
+    const pageText = textContent.items.map(item => item.str).join(' ');
+    fullText += pageText + '\n\n';
+  }
+  
+  return fullText.trim();
+}
+```
+
+**Capabilities**:
+- Multi-page text extraction
+- Handles text-based PDFs (not scanned images)
+- Preserves paragraph breaks
+- No OCR support
+
+#### 3. **DOCX Parsing (Mammoth.js)**
+
+```javascript
+// Uses Mammoth.js v1.6.0 from CDN
+
+async function parseDOCX(file) {
+  const arrayBuffer = await file.arrayBuffer();
+  const result = await mammoth.extractRawText({ arrayBuffer });
+  return result.value.trim();
+}
+```
+
+**Capabilities**:
+- Raw text extraction (no formatting)
+- Tables converted to plain text
+- Images ignored
+- Fast processing
+
+#### 4. **Plain Text Files**
+
+```javascript
+async function parseTextFile(file) {
+  return await file.text();
+}
+```
+
+Supports: `.txt`, `.md`, `.json`, `.csv`
+
+### Document Management Functions
+
+#### **getConversationDocuments(convoId)**
+
+Retrieves all documents for a conversation:
+
+```javascript
+async function getConversationDocuments(convoId) {
+  if (!convoId) return [];
+  return await dbGetAllByIndex('documents', 'convoId', convoId);
+}
+```
+
+#### **uploadDocument(convoId, file)**
+
+Uploads and stores a document:
+
+```javascript
+async function uploadDocument(convoId, file) {
+  const content = await parseDocumentFile(file);
+  
+  // Validate extracted content size (5MB limit)
+  if (content.length > CFG.MAX_DOCUMENT_CONTENT_SIZE) {
+    throw new Error('Extracted text too large');
+  }
+  
+  const doc = {
+    id: uid(),
+    convoId,
+    filename: file.name,
+    content: content,
+    format: file.name.split('.').pop().toLowerCase(),
+    uploadedAt: Date.now(),
+  };
+  await dbPut('documents', doc);
+  return doc;
+}
+```
+
+**Validation**:
+- File type checking: `.pdf`, `.docx`, `.txt`, `.md`, `.json`, `.csv`
+- **File size limit**: 10MB maximum for raw upload
+- **Content size limit**: 5MB maximum for extracted text
+- Active conversation required
+- Error handling for parsing failures and size violations
+
+#### **deleteDocument(docId)**
+
+Removes a single document:
+
+```javascript
+async function deleteDocument(docId) {
+  await dbDelete('documents', docId);
+}
+```
+
+#### **clearAllDocuments(convoId)**
+
+Removes all documents from a conversation:
+
+```javascript
+async function clearAllDocuments(convoId) {
+  const docs = await getConversationDocuments(convoId);
+  for (const doc of docs) {
+    await deleteDocument(doc.id);
+  }
+}
+```
+
+### RAG Context Injection
+
+#### System Prompt Construction
+
+When documents are present, a RAG system prompt is injected before all other messages:
+
+```javascript
+const ragSystemPrompt = `You are a helpful AI assistant with access to the following documents. When answering questions, prioritize information from these documents. If the answer is not in the documents, you may use your general knowledge but clearly indicate when you're doing so.
+
+### KNOWLEDGE BASE ###
+
+${knowledgeBase}
+
+### END KNOWLEDGE BASE ###
+
+Please answer the user's questions based on the documents provided above when relevant.`;
+```
+
+**Knowledge Base Format**:
+```
+### Document: filename1.pdf ###
+[Full extracted content]
+
+---
+
+### Document: filename2.docx ###
+[Full extracted content]
+```
+
+#### Integration Points
+
+**1. sendMessage() - Trunk & Branch Messages**
+
+```javascript
+async function sendMessage() {
+  // ... existing code ...
+  
+  let apiMsgs = [];
+  
+  // RAG: Inject documents if present
+  const docs = await getConversationDocuments(node.convoId);
+  if (docs && docs.length > 0) {
+    const knowledgeBase = docs.map(doc => 
+      `### Document: ${doc.filename} ###\n${doc.content}`
+    ).join('\n\n---\n\n');
+    
+    apiMsgs.push({ role: 'system', content: ragSystemPrompt });
+  }
+  
+  // Continue building context...
+  // For branches: add snapshot messages
+  // Add current messages
+  
+  const reply = await callLM(apiMsgs);
+  // ... store reply ...
+}
+```
+
+**2. launchBranches() - Fork Creation**
+
+```javascript
+async function launchBranches() {
+  // ... existing code ...
+  
+  const lmCalls = branchIds.map(async (bid) => {
+    let apiMsgs = [];
+    
+    // RAG: Inject documents for each branch
+    const docs = await getConversationDocuments(node.convoId);
+    if (docs && docs.length > 0) {
+      apiMsgs.push({ role: 'system', content: ragSystemPrompt });
+    }
+    
+    // Add snapshot context
+    // Add branch messages
+    // Call LLM
+  });
+}
+```
+
+### UI Components
+
+#### Documents Panel
+
+Located in sidebar between search and tree:
+
+```html
+<div id="documentsPanel">
+  <h4>📄 Documents (RAG)</h4>
+  <label for="docFileInput" class="doc-upload-btn">
+    + Upload Document (PDF, DOCX, TXT, MD)
+  </label>
+  <input type="file" id="docFileInput" accept=".pdf,.docx,.txt,.md,.json,.csv" style="display:none;" />
+  <div class="doc-list" id="docList">
+    <!-- Document items or empty state -->
+  </div>
+  <button class="doc-clear-all" id="docClearAllBtn">Clear All Documents</button>
+</div>
+```
+
+**States**:
+- No conversation selected: "Select a conversation first"
+- No documents: "No documents uploaded"
+- With documents: List with remove buttons + clear all button
+
+#### RAG Status Badge
+
+Appears in chat header when documents are present:
+
+```html
+<div id="ragStatusBadge" class="active">
+  🟢 RAG Active: 2 docs
+</div>
+```
+
+**Styling**:
+- Orange badge (`--orange-light` background)
+- Auto-shown/hidden based on document count
+- Updates when documents change
+
+#### Document List Items
+
+```html
+<div class="doc-item">
+  <span class="doc-item-icon">📄</span>
+  <span class="doc-item-name" title="document.pdf">document.pdf</span>
+  <button class="doc-item-remove" onclick="handleDocumentRemove('doc-id')">×</button>
+</div>
+```
+
+### Event Handlers
+
+```javascript
+// Document upload
+document.getElementById('docFileInput').addEventListener('change', handleDocumentUpload);
+
+// Document clear all
+document.getElementById('docClearAllBtn').addEventListener('click', handleDocumentsClearAll);
+
+// Individual document remove (inline onclick)
+async function handleDocumentRemove(docId) {
+  if (!confirm('Remove this document from the conversation?')) return;
+  await deleteDocument(docId);
+  await renderDocumentsList();
+}
+```
+
+### State Management
+
+**state.activeDocuments**:
+- Array of document objects for current conversation
+- Updated when switching conversations (setActiveNode)
+- Updated after upload/delete operations
+- Used for RAG badge rendering
+
+**Lifecycle**:
+```javascript
+// On conversation switch
+async function setActiveNode(nodeId) {
+  // ... existing code ...
+  state.activeConvoId = node.convoId;
+  await renderDocumentsList();  // Updates state.activeDocuments
+  updateRagStatus();
+}
+
+// On document upload
+async function handleDocumentUpload(event) {
+  await uploadDocument(state.activeConvoId, file);
+  await renderDocumentsList();  // Refreshes UI and state
+}
+```
+
+### RAG + Branching Integration
+
+**Context Inheritance**:
+- Documents linked to conversation, not individual nodes
+- All branches (trunk, active branches, forks) share same documents
+- When forking, branches automatically get RAG context
+- When promoting/splitting, new conversation does NOT inherit documents (fresh slate)
+
+**Use Cases**:
+1. **Explore document questions**: Fork to try different questions on same content
+2. **Compare interpretations**: Multiple branches with different prompts on same docs
+3. **Refine understanding**: Commit valuable insights to trunk while exploring tangents
+4. **Document-specific tangents**: Split to new conversation for unrelated follow-ups
+
+### Performance Considerations
+
+**Upload Performance**:
+- PDF parsing: ~50-200ms per page (depends on content)
+- DOCX parsing: ~100-500ms per document
+- Text files: Near-instant
+
+**File Size Limits**:
+- **Raw file upload**: 10MB maximum
+- **Extracted text content**: 5MB maximum
+- Rationale:
+  - Prevents IndexedDB quota issues (typically 50MB-500MB available)
+  - Ensures LLM token limits not exceeded (~128K-200K tokens = ~500KB-800KB)
+  - Maintains responsive parsing and UI performance
+  - Large documents should be split for better RAG accuracy anyway
+
+**Context Size Impact**:
+- Documents injected as system message (counted in context)
+- 5MB text limit ≈ 1.25M tokens (well below most model limits)
+- Context counter includes document size
+- Very large knowledge bases may approach model context windows
+
+**Storage**:
+- Plain text storage is space-efficient
+- IndexedDB typically 50MB+ limit per origin
+- With 5MB per doc limit: ~10-100 documents feasible (depending on browser)
+- Recommend exporting conversations periodically as backup
+
+### Security Considerations
+
+**Client-Side Only**:
+- All parsing happens in browser
+- No document data sent to servers (except LLM via LM Studio)
+- Documents stored in browser IndexedDB only
+
+**File Validation**:
+- Extension-based type checking
+- No server-side validation needed
+- Malicious file risk limited to client-side parsing libraries
+
+**Data Privacy**:
+- Documents never leave user's machine (except LM Studio)
+- No cloud storage or external API calls
+- User controls all data lifecycle
+
+### Future Enhancements
+
+Potential improvements:
+- **Chunking**: Split large documents for better context management
+- **Document summaries**: Pre-generate summaries for context efficiency
+- **Vector search**: Semantic retrieval instead of full-text injection
+- **File viewers**: Preview documents before upload
+- **OCR support**: Extract text from scanned PDFs
+- **Export with documents**: Include document references in MD export
+- **Document versioning**: Track document history and changes
 
 ---
 

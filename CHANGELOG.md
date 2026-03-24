@@ -5,6 +5,60 @@ All notable changes to ORAND Praxis will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-03-24
+
+### 🎉 Major Feature: RAG Document Integration
+
+### Added
+- **Document Upload & Processing**: Upload documents directly to conversations for document-grounded discussions
+  - Supports PDF (via PDF.js), DOCX (via Mammoth.js), TXT, MD, JSON, CSV formats
+  - Automatic document parsing and text extraction
+  - Documents stored per conversation in IndexedDB
+- **RAG Context Injection**: Documents automatically injected as system prompts for all LLM requests
+  - Knowledge base formatted with document titles and content
+  - Clear instructions for LLM to prioritize document information
+  - Works with both trunk messages and branch forks
+  - RAG context inherited by all fork branches from same conversation
+- **Documents Panel**: New sidebar section for document management
+  - Upload button with file type validation
+  - Document list showing all uploaded files for active conversation
+  - Individual document removal (×) button
+  - Clear all documents button
+  - Empty state guidance ("Select a conversation first")
+- **RAG Status Indicators**: Visual feedback showing when RAG is active
+  - Orange RAG badge in chat header: "🟢 RAG Active: N docs"
+  - Badge hidden when no documents present
+  - Document count updates in real-time
+- **CDN Dependencies**: Added PDF.js (v3.11.174) and Mammoth.js (v1.6.0) for document processing
+
+### Changed
+- **Database Schema**: Upgraded to v3 with new `documents` object store
+  - Schema: `{id, convoId, filename, content, format, uploadedAt}`
+  - Indexes on `convoId` and `uploadedAt` for efficient queries
+  - Automatic migration from v2 → v3 for existing users
+- **State Management**: Added `activeDocuments` array to track documents for current conversation
+- **Clear All Data**: Now includes documents when clearing all conversations
+- **App Description**: Updated to include "RAG document integration"
+
+### Technical
+- **Database Functions**: Added `getConversationDocuments()`, `uploadDocument()`, `deleteDocument()`, `clearAllDocuments()`
+- **Document Parsing**: `parseDocumentFile()` handles all supported formats with appropriate library
+- **UI Rendering**: `renderDocumentsList()` updates document panel when switching conversations
+- **RAG Prompt Construction**: System message with knowledge base injected before all LLM API calls
+- **Event Handlers**: Document upload input and clear all button integrated into event binding
+- **setActiveNode Enhancement**: Now updates `state.activeConvoId` and calls `renderDocumentsList()`
+- **File Size Limits**: 10MB raw upload limit, 5MB extracted text limit to prevent quota issues and ensure optimal LLM performance
+
+### User Benefits
+- **Document-Grounded Conversations**: Ask questions about uploaded documents with LLM responses based on content
+- **Branching + RAG**: Fork conversations to explore different questions on same documents
+- **Context Preservation**: Documents linked to conversations, not global - prevents cross-contamination
+- **Complete Integration**: RAG works seamlessly with all existing features (commit, promote, split, export)
+- **Audit Trail**: Document references preserved in conversation snapshots and exports
+
+### Breaking Changes
+None - fully backward compatible. Existing conversations work unchanged; new feature is opt-in per conversation.
+
 ## [1.7.1] - 2026-03-24
 
 ### Fixed

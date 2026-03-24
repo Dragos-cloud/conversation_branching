@@ -3,8 +3,8 @@
 <head>
 <!-- SECTION:META
   App: ORAND Praxis
-  Version: 1.7.1
-  Description: Non-linear LLM conversation tool with selective commit injection, exact context preservation, branching, promote/split to new conversations, complete audit trail, MD export, and full-text search
+  Version: 2.0.0
+  Description: Non-linear LLM conversation tool with RAG document integration, selective commit injection, exact context preservation, branching, promote/split to new conversations, complete audit trail, MD export, and full-text search
   Last-modified: 2026-03-24
   Sections: META, CONFIG, STYLE, STATE, UI, LOGIC:db, LOGIC:actionlog, LOGIC:lmstudio, LOGIC:tree, LOGIC:branch, LOGIC:search, LOGIC:export, EVENTS, INIT, USERGUIDE
 -->
@@ -899,7 +899,132 @@
   #appShell {
     padding-bottom: 32px;
   }
+
+  /* === DOCUMENTS PANEL === */
+  #documentsPanel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin: 8px 12px;
+    padding: 12px;
+  }
+  #documentsPanel h4 {
+    font-size: 13px;
+    color: var(--text);
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  #documentsPanel .doc-limits {
+    font-size: 10px;
+    color: var(--text-muted);
+    font-weight: normal;
+    margin-left: auto;
+    white-space: nowrap;
+  }
+  #documentsPanel .doc-upload-btn {
+    width: 100%;
+    padding: 8px;
+    background: var(--orange-light);
+    color: var(--orange);
+    border: 1px dashed var(--orange);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    text-align: center;
+    transition: all 0.15s;
+    margin-bottom: 8px;
+  }
+  #documentsPanel .doc-upload-btn:hover {
+    background: var(--orange);
+    color: white;
+    border-style: solid;
+  }
+  #documentsPanel .doc-list {
+    max-height: 150px;
+    overflow-y: auto;
+    margin-bottom: 8px;
+  }
+  #documentsPanel .doc-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    background: var(--bg);
+    border-radius: 4px;
+    margin-bottom: 4px;
+    font-size: 11px;
+  }
+  #documentsPanel .doc-item-icon {
+    font-size: 14px;
+  }
+  #documentsPanel .doc-item-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text);
+  }
+  #documentsPanel .doc-item-remove {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 2px 6px;
+    font-size: 14px;
+    line-height: 1;
+    border-radius: 3px;
+    transition: all 0.15s;
+  }
+  #documentsPanel .doc-item-remove:hover {
+    background: #fadbd8;
+    color: #e74c3c;
+  }
+  #documentsPanel .doc-clear-all {
+    width: 100%;
+    padding: 6px;
+    background: transparent;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 11px;
+    transition: all 0.15s;
+  }
+  #documentsPanel .doc-clear-all:hover {
+    background: #fadbd8;
+    color: #e74c3c;
+    border-color: #fadbd8;
+  }
+  #documentsPanel .doc-empty {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 11px;
+    padding: 12px;
+    font-style: italic;
+  }
+  #ragStatusBadge {
+    display: none;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    background: var(--orange-light);
+    color: var(--orange);
+    border: 1px solid var(--orange);
+  }
+  #ragStatusBadge.active {
+    display: flex;
+  }
 </style>
+
+<!-- CDN Libraries for Document Processing -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+
 </head>
 <body>
 
@@ -944,6 +1069,23 @@
             <button id="searchClear" title="Clear search">×</button>
             <div id="searchResults"></div>
           </div>
+
+          <!-- Documents Panel -->
+          <div id="documentsPanel">
+            <h4>
+              <span>📄 Documents (RAG)</span>
+              <span class="doc-limits" title="Maximum: 10MB file size, 5MB extracted text">Max: 10MB</span>
+            </h4>
+            <label for="docFileInput" class="doc-upload-btn">
+              + Upload Document (PDF, DOCX, TXT, MD)
+            </label>
+            <input type="file" id="docFileInput" accept=".pdf,.docx,.txt,.md,.json,.csv" style="display:none;" />
+            <div class="doc-list" id="docList">
+              <div class="doc-empty">No documents uploaded</div>
+            </div>
+            <button class="doc-clear-all" id="docClearAllBtn" style="display:none;">Clear All Documents</button>
+          </div>
+
           <div id="treeContainer">
             <div style="padding:20px;text-align:center;color:var(--text-muted);font-size:12px;">No conversations yet.<br>Start a new one above.</div>
           </div>
@@ -1233,12 +1375,14 @@
 // ── CONFIG ──────────────────────────────────────────────────────────────────
 const CFG = {
   DB_NAME: 'orand_brancher',
-  DB_VERSION: 2,
+  DB_VERSION: 3,
   MAX_BRANCHES_PER_FORK: 4,
   BRANCH_CAN_BRANCH: false, // v1: off. Set true to unlock in future
   BRANCH_COLORS: ['#e74c3c','#27ae60','#8e44ad','#e67e22'],
   SUMMARY_MAX_TOKENS: 400,
   LM_DEFAULT_URL: 'http://localhost:1234',
+  MAX_DOCUMENT_FILE_SIZE: 10 * 1024 * 1024,      // 10MB raw file upload limit
+  MAX_DOCUMENT_CONTENT_SIZE: 5 * 1024 * 1024,    // 5MB extracted text limit
 };
 
 // ── STATE ────────────────────────────────────────────────────────────────────
@@ -1254,6 +1398,7 @@ let state = {
   searchQuery: '',      // Current search query
   searchResults: [],    // Search results array
   activeSearchHighlight: '', // Search term to highlight in messages
+  activeDocuments: [],  // Documents for active conversation
 };
 
 // ── UTILS ────────────────────────────────────────────────────────────────────
@@ -1320,6 +1465,11 @@ async function initDB() {
         al.createIndex('convoId','convoId');
         al.createIndex('timestamp','timestamp');
       }
+      if (!d.objectStoreNames.contains('documents')) {
+        const ds = d.createObjectStore('documents', { keyPath: 'id' });
+        ds.createIndex('convoId','convoId');
+        ds.createIndex('uploadedAt','uploadedAt');
+      }
 
       // ── Upgrade from v1 → v2 (add status index to existing nodes store) ──
       if (oldVersion === 1 && d.objectStoreNames.contains('nodes')) {
@@ -1327,6 +1477,13 @@ async function initDB() {
         if (!ns.indexNames.contains('status')) {
           ns.createIndex('status','status');
         }
+      }
+
+      // ── Upgrade from v2 → v3 (add documents object store) ──
+      if (oldVersion === 2 && !d.objectStoreNames.contains('documents')) {
+        const ds = d.createObjectStore('documents', { keyPath: 'id' });
+        ds.createIndex('convoId','convoId');
+        ds.createIndex('uploadedAt','uploadedAt');
       }
     };
   });
@@ -1370,13 +1527,186 @@ function dbGetAllByIndex(store, indexName, value) {
 }
 
 async function dbClearAll() {
-  const stores = ['conversations','nodes','messages','snapshots','actionLog'];
+  const stores = ['conversations','nodes','messages','snapshots','actionLog','documents'];
   for (const s of stores) {
     await new Promise((res,rej)=>{
       const r = dbTx(s,'readwrite').clear();
       r.onsuccess = ()=>res(); r.onerror = ()=>rej(r.error);
     });
   }
+}
+
+// ── DOCUMENTS (RAG) ───────────────────────────────────────────────────────────
+async function getConversationDocuments(convoId) {
+  if (!convoId) return [];
+  return await dbGetAllByIndex('documents', 'convoId', convoId);
+}
+
+async function uploadDocument(convoId, file) {
+  const content = await parseDocumentFile(file);
+  
+  // Validate extracted content size
+  if (content.length > CFG.MAX_DOCUMENT_CONTENT_SIZE) {
+    const sizeMB = (content.length / (1024 * 1024)).toFixed(2);
+    const maxMB = (CFG.MAX_DOCUMENT_CONTENT_SIZE / (1024 * 1024)).toFixed(0);
+    throw new Error(`Extracted text too large: ${sizeMB}MB\nMaximum content size: ${maxMB}MB\n\nThis document contains too much text. Consider:\n• Splitting into smaller files\n• Extracting only relevant sections\n• Using a more concise source document`);
+  }
+  
+  const doc = {
+    id: uid(),
+    convoId,
+    filename: file.name,
+    content: content,
+    format: file.name.split('.').pop().toLowerCase(),
+    uploadedAt: Date.now(),
+  };
+  await dbPut('documents', doc);
+  return doc;
+}
+
+async function deleteDocument(docId) {
+  await dbDelete('documents', docId);
+}
+
+async function clearAllDocuments(convoId) {
+  const docs = await getConversationDocuments(convoId);
+  for (const doc of docs) {
+    await deleteDocument(doc.id);
+  }
+}
+
+async function parseDocumentFile(file) {
+  const filename = file.name.toLowerCase();
+  
+  if (filename.endsWith('.pdf')) {
+    // Parse PDF using PDF.js
+    const arrayBuffer = await file.arrayBuffer();
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    let fullText = '';
+    
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const textContent = await page.getTextContent();
+      const pageText = textContent.items.map(item => item.str).join(' ');
+      fullText += pageText + '\n\n';
+    }
+    
+    return fullText.trim();
+  } 
+  else if (filename.endsWith('.docx')) {
+    // Parse DOCX using Mammoth.js
+    const arrayBuffer = await file.arrayBuffer();
+    const result = await mammoth.extractRawText({ arrayBuffer });
+    return result.value.trim();
+  } 
+  else {
+    // Plain text files (TXT, MD, JSON, CSV)
+    return await file.text();
+  }
+}
+
+async function renderDocumentsList() {
+  const docList = document.getElementById('docList');
+  const clearBtn = document.getElementById('docClearAllBtn');
+  
+  if (!state.activeConvoId) {
+    docList.innerHTML = '<div class="doc-empty">Select a conversation first</div>';
+    clearBtn.style.display = 'none';
+    state.activeDocuments = [];
+    return;
+  }
+  
+  const docs = await getConversationDocuments(state.activeConvoId);
+  state.activeDocuments = docs;
+  
+  if (docs.length === 0) {
+    docList.innerHTML = '<div class="doc-empty">No documents uploaded</div>';
+    clearBtn.style.display = 'none';
+  } else {
+    docList.innerHTML = docs.map(doc => `
+      <div class="doc-item">
+        <span class="doc-item-icon">📄</span>
+        <span class="doc-item-name" title="${doc.filename}">${doc.filename}</span>
+        <button class="doc-item-remove" onclick="handleDocumentRemove('${doc.id}')" title="Remove">×</button>
+      </div>
+    `).join('');
+    clearBtn.style.display = 'block';
+  }
+  
+  updateRagStatus();
+}
+
+function updateRagStatus() {
+  const chatHeader = document.getElementById('chatHeader');
+  let ragBadge = document.getElementById('ragStatusBadge');
+  
+  // Create badge if it doesn't exist
+  if (!ragBadge) {
+    ragBadge = document.createElement('div');
+    ragBadge.id = 'ragStatusBadge';
+    chatHeader.insertBefore(ragBadge, chatHeader.firstChild);
+  }
+  
+  if (state.activeDocuments && state.activeDocuments.length > 0) {
+    ragBadge.className = 'active';
+    ragBadge.innerHTML = `🟢 RAG Active: ${state.activeDocuments.length} doc${state.activeDocuments.length > 1 ? 's' : ''}`;
+  } else {
+    ragBadge.className = '';
+  }
+}
+
+async function handleDocumentUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  
+  if (!state.activeConvoId) {
+    alert('Please select or create a conversation first.');
+    event.target.value = '';
+    return;
+  }
+  
+  // File size validation
+  if (file.size > CFG.MAX_DOCUMENT_FILE_SIZE) {
+    const sizeMB = (file.size / (1024 * 1024)).toFixed(2);
+    const maxMB = (CFG.MAX_DOCUMENT_FILE_SIZE / (1024 * 1024)).toFixed(0);
+    alert(`File too large: ${sizeMB}MB\nMaximum file size: ${maxMB}MB\n\nFor large documents, consider splitting into smaller files.`);
+    event.target.value = '';
+    return;
+  }
+  
+  const validExtensions = ['pdf', 'docx', 'txt', 'md', 'json', 'csv'];
+  const ext = file.name.split('.').pop().toLowerCase();
+  
+  if (!validExtensions.includes(ext)) {
+    alert(`Unsupported file type: .${ext}\nSupported: PDF, DOCX, TXT, MD, JSON, CSV`);
+    event.target.value = '';
+    return;
+  }
+  
+  try {
+    await uploadDocument(state.activeConvoId, file);
+    await renderDocumentsList();
+    event.target.value = ''; // Reset input
+  } catch (err) {
+    console.error('Document upload failed:', err);
+    alert(`Failed to upload document: ${err.message}`);
+    event.target.value = '';
+  }
+}
+
+async function handleDocumentRemove(docId) {
+  if (!confirm('Remove this document from the conversation?')) return;
+  await deleteDocument(docId);
+  await renderDocumentsList();
+}
+
+async function handleDocumentsClearAll() {
+  if (!state.activeConvoId) return;
+  if (!confirm('Remove all documents from this conversation?')) return;
+  await clearAllDocuments(state.activeConvoId);
+  await renderDocumentsList();
 }
 
 // ── ACTION LOG ────────────────────────────────────────────────────────────────
@@ -1590,6 +1920,14 @@ async function setActiveNode(nodeId, preserveSearchHighlight = false) {
   if (!preserveSearchHighlight && state.activeSearchHighlight) {
     state.activeSearchHighlight = '';
   }
+  
+  // Update active conversation for documents
+  const node = state.nodes[nodeId];
+  if (node) {
+    state.activeConvoId = node.convoId;
+  }
+  
+  await renderDocumentsList();
   await renderChat();
   renderTreeHighlight();
 }
@@ -1730,8 +2068,29 @@ async function launchBranches() {
     
     // Construct full context: snapshot messages + branch messages
     let apiMsgs = [];
+    
+    // === RAG: Inject documents as system prompt if present ===
+    const docs = await getConversationDocuments(node.convoId);
+    if (docs && docs.length > 0) {
+      const knowledgeBase = docs.map(doc => 
+        `### Document: ${doc.filename} ###\n${doc.content}`
+      ).join('\n\n---\n\n');
+      
+      const ragSystemPrompt = `You are a helpful AI assistant with access to the following documents. When answering questions, prioritize information from these documents. If the answer is not in the documents, you may use your general knowledge but clearly indicate when you're doing so.
+
+### KNOWLEDGE BASE ###
+
+${knowledgeBase}
+
+### END KNOWLEDGE BASE ###
+
+Please answer the user's questions based on the documents provided above when relevant.`;
+      
+      apiMsgs.push({ role: 'system', content: ragSystemPrompt });
+    }
+    
     if (snaps.length && snaps[0].messages) {
-      apiMsgs = [...snaps[0].messages];  // Exact context from fork point
+      apiMsgs = [...apiMsgs, ...snaps[0].messages];  // Exact context from fork point
     }
     
     // Add branch messages (excluding system notes)
@@ -2353,11 +2712,31 @@ async function sendMessage() {
     // Build API message array with exact context
     let apiMsgs = [];
     
+    // === RAG: Inject documents as system prompt if present ===
+    const docs = await getConversationDocuments(node.convoId);
+    if (docs && docs.length > 0) {
+      const knowledgeBase = docs.map(doc => 
+        `### Document: ${doc.filename} ###\n${doc.content}`
+      ).join('\n\n---\n\n');
+      
+      const ragSystemPrompt = `You are a helpful AI assistant with access to the following documents. When answering questions, prioritize information from these documents. If the answer is not in the documents, you may use your general knowledge but clearly indicate when you're doing so.
+
+### KNOWLEDGE BASE ###
+
+${knowledgeBase}
+
+### END KNOWLEDGE BASE ###
+
+Please answer the user's questions based on the documents provided above when relevant.`;
+      
+      apiMsgs.push({ role: 'system', content: ragSystemPrompt });
+    }
+    
     // For branches, prepend exact snapshot messages
     if (!node.isTrunk) {
       const snaps = await dbGetAllByIndex('snapshots','nodeId', nodeId);
       if (snaps.length && snaps[0].messages) {
-        apiMsgs = [...snaps[0].messages];  // Exact trunk context at fork point
+        apiMsgs = [...apiMsgs, ...snaps[0].messages];  // Exact trunk context at fork point
       }
     }
     
@@ -3016,12 +3395,20 @@ function bindEvents() {
       state.activeConvoId = null;
       state.activeNodeId = null;
       state.nodes = {}; state.messages = {};
+      state.activeDocuments = [];
       await renderTree();
+      await renderDocumentsList();
       document.getElementById('messagesArea').innerHTML = '<div id="emptyState"><div class="empty-icon">🌿</div><p>All data cleared. Start a new conversation.</p></div>';
       document.getElementById('chatNodeTitle').textContent = 'No conversation selected';
       document.getElementById('chatNodeDesc').textContent = '';
     });
   });
+
+  // Document upload
+  document.getElementById('docFileInput').addEventListener('change', handleDocumentUpload);
+  
+  // Document clear all
+  document.getElementById('docClearAllBtn').addEventListener('click', handleDocumentsClearAll);
 
   // Click outside modal
   document.getElementById('confirmModal').addEventListener('click', e => {

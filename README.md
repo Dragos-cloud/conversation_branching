@@ -10,7 +10,8 @@ ORAND Praxis is a single-file HTML application that enables branching conversati
 - **🔀 Fork Management**: Split conversations into multiple parallel branches to explore different responses
 - **🎯 Exact Context Preservation**: Branches inherit complete message history with zero information loss (v1.5)
 - **✨ Selective Message Commit**: Cherry-pick which messages to merge from branches to trunk with interactive UI (v1.6)
-- **📊 Context Size Indicator**: Real-time message count with color-coded efficiency metrics (v1.5)
+- **� RAG Document Integration**: Upload documents (PDF, DOCX, TXT, MD, JSON, CSV) for document-grounded conversations (v2.0)
+- **�📊 Context Size Indicator**: Real-time message count with color-coded efficiency metrics (v1.5)
 - **🔍 Full-Text Search**: Search across all conversations, branches, and messages with instant results
 - **📝 Audit Trail**: Soft-delete system maintains conversation history with read-only visibility for all resolved branches: discarded, promoted, and split (v1.4, v1.6.2, v1.6.3, v1.7)
 - **💾 Local Storage**: All data stored locally in IndexedDB - no server required
@@ -106,6 +107,58 @@ The modal shows each message with its role (user/assistant), content preview, an
 
 For branches, hover over the counter to see a comparison with the parent branch's context size.
 
+### Document Upload & RAG (v2.0)
+
+**RAG (Retrieval-Augmented Generation)** allows you to ground LLM responses in your uploaded documents.
+
+#### Uploading Documents
+
+1. **Select a conversation** or create a new one
+2. In the sidebar, find the **📄 Documents (RAG)** panel
+3. Click **"+ Upload Document"** button
+4. Select a file (PDF, DOCX, TXT, MD, JSON, or CSV)
+5. Document is parsed and stored with the conversation
+
+#### Using RAG
+
+- Once documents are uploaded, the **🟢 RAG Active** badge appears in the chat header
+- All messages sent in that conversation will have access to the document content
+- The LLM receives documents as part of its system prompt with instructions to prioritize document information
+- Ask questions about the documents: "What is the main conclusion?", "Summarize section 3", etc.
+
+#### RAG + Branching
+
+ RAG works seamlessly with all branching features:
+- **Fork with documents**: Create branches to explore different questions on the same documents
+- **Compare approaches**: Branch to compare RAG vs non-RAG responses (upload docs to one branch only)
+- **Commit insights**: Merge valuable document-based insights back to trunk
+- **Promote/Split**: Documents stay linked to conversation - promoted/split branches inherit document context
+
+#### Managing Documents
+
+- **View uploaded documents**: See list in sidebar with file names
+- **Remove individual document**: Click × button next to file name
+- **Clear all documents**: Click "Clear All Documents" button to remove all files from conversation
+- **Per-conversation storage**: Documents are linked to specific conversations, not global
+
+#### Supported Formats
+
+- **PDF**: Full text extraction from all pages (via PDF.js)
+- **DOCX**: Microsoft Word document text extraction (via Mammoth.js)
+- **TXT**: Plain text files
+- **MD**: Markdown files
+- **JSON**: JSON data files
+- **CSV**: Comma-separated value files
+
+#### File Size Limits
+
+- **Maximum file size**: 10MB (raw upload)
+- **Maximum extracted text**: 5MB (after parsing)
+- These limits prevent browser storage quota issues and ensure optimal LLM performance
+- Large documents should be split into smaller, focused files for better RAG results
+
+**Note**: RAG context is injected automatically - you don't need to reference documents explicitly. Just ask questions naturally.
+
 ### Exporting
 
 Click the "Export as Markdown" button to download your entire conversation tree as a `.md` file. The export includes:
@@ -141,12 +194,13 @@ The application is structured in clear sections:
 - **STATE**: Application state management
 - **UI**: User interface rendering functions
 - **LOGIC**: Core functionality modules
-  - `db`: IndexedDB operations
+  - `db`: IndexedDB operations (6 stores: conversations, nodes, messages, snapshots, actionLog, documents)
   - `actionlog`: Audit trail management
   - `lmstudio`: LM Studio API integration
   - `tree`: Conversation tree management
   - `branch`: Branch operations
   - `export`: Markdown export functionality
+  - `documents`: RAG document processing (PDF.js, Mammoth.js)
 - **EVENTS**: Event handlers
 - **INIT**: Application initialization
 - **USERGUIDE**: Built-in user documentation
@@ -187,7 +241,14 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Version History
 
-- **v1.2** (2026-03-22): Current version with full branching and export capabilities
+- **v2.0.0** (2026-03-24): RAG document integration - upload PDF, DOCX, TXT, MD, JSON, CSV for document-grounded conversations
+- **v1.7.1** (2026-03-24): Read-only UI consistency for all resolved branches
+- **v1.7.0** (2026-03-24): Promote creates new conversations with full context
+- **v1.6.3** (2026-03-24): Split branch visibility with audit trail
+- **v1.6.2** (2026-03-24): Promoted branch visibility
+- **v1.6.0** (2026-03-24): Selective message commit with interactive UI
+- **v1.5.0** (2026-03-23): Exact context preservation, context size indicator
+- **v1.2** (2026-03-22): Full branching and export capabilities
 
 ## Support
 

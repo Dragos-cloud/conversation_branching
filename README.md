@@ -30,7 +30,7 @@ ORAND Praxis is a single-file HTML application that enables branching conversati
 
 ### Installation
 
-1. Download `orand_praxis_v1.3.html` (or latest version)
+1. Download `orand_praxis_v2.0.html` (or latest version)
 2. Open the file in your web browser
 3. That's it! The app is ready to use.
 
